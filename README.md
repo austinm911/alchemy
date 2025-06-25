@@ -1,6 +1,6 @@
 # Alchemy
 
-[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/Effect-TS/effect)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/sam-goodwin/alchemy)
 
 Alchemy is an embeddable, TypeScript-native Infrastructure-as-Code (IaC) library for modeling Resources that are Created, Updated and Deleted automatically. It's like Terraform, but in pure TypeScript.
 
