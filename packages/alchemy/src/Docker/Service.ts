@@ -18,6 +18,7 @@ import { createInternalTags, hasAlchemyTags } from "../Tags.ts";
 import {
   Docker,
   dockerEngineContextName,
+  dockerHealthCmd,
   dockerPhysicalName,
 } from "./Docker.ts";
 import type { Providers } from "./Providers.ts";
@@ -229,7 +230,11 @@ export declare namespace Service {
   }
 
   interface Healthcheck {
-    /** Command to run for health checks. */
+    /**
+     * Command to run for health checks. Docker runs it through a shell, so a
+     * leading Docker-native `"CMD-SHELL"` or `"CMD"` directive is optional and
+     * is dropped.
+     */
     cmd: string[] | string;
     /** Time between checks, e.g. `"30s"`. */
     interval?: string;
@@ -484,7 +489,7 @@ export interface ServiceRuntimeContext extends HostRuntimeContext {
  *   context: swarm,
  *   image: "postgres:18-alpine",
  *   networks: [{ name: network.name, aliases: ["postgres"] }],
- *   volumes: [{ hostPath: "pg-data", containerPath: "/var/lib/postgresql/data" }],
+ *   volumes: [{ hostPath: "pg-data", containerPath: "/var/lib/postgresql" }],
  * });
  * ```
  *
@@ -737,11 +742,7 @@ export const ServiceProvider = () =>
                 "restart-delay": desired.restartPolicy?.delay,
                 "restart-max-attempts": desired.restartPolicy?.maxAttempts,
                 "restart-window": desired.restartPolicy?.window,
-                "health-cmd": desired.healthcheck
-                  ? Array.isArray(desired.healthcheck.cmd)
-                    ? desired.healthcheck.cmd.join(" ")
-                    : desired.healthcheck.cmd
-                  : undefined,
+                "health-cmd": dockerHealthCmd(desired.healthcheck?.cmd),
                 "health-interval": desired.healthcheck?.interval,
                 "health-timeout": desired.healthcheck?.timeout,
                 "health-retries": desired.healthcheck?.retries,
@@ -809,11 +810,7 @@ export const ServiceProvider = () =>
             "restart-delay": desired.restartPolicy?.delay,
             "restart-max-attempts": desired.restartPolicy?.maxAttempts,
             "restart-window": desired.restartPolicy?.window,
-            "health-cmd": desired.healthcheck
-              ? Array.isArray(desired.healthcheck.cmd)
-                ? desired.healthcheck.cmd.join(" ")
-                : desired.healthcheck.cmd
-              : undefined,
+            "health-cmd": dockerHealthCmd(desired.healthcheck?.cmd),
             "health-interval": desired.healthcheck?.interval,
             "health-timeout": desired.healthcheck?.timeout,
             "health-retries": desired.healthcheck?.retries,

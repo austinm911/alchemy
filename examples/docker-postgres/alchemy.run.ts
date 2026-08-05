@@ -43,12 +43,15 @@ export default Alchemy.Stack(
       volumes: [
         {
           hostPath: data.name,
-          containerPath: "/var/lib/postgresql/data",
+          // Postgres 18 images store data in a major-version subdirectory, so
+          // the mount belongs one level up. A mount on
+          // `/var/lib/postgresql/data` is ignored and initdb refuses to start.
+          containerPath: "/var/lib/postgresql",
         },
       ],
       networks: [{ name: network.name, aliases: ["postgres"] }],
       healthcheck: {
-        cmd: ["CMD-SHELL", "pg_isready -U alchemy -d app"],
+        cmd: ["pg_isready", "-U", "alchemy", "-d", "app"],
         interval: "5 seconds",
         timeout: "5 seconds",
         retries: 10,

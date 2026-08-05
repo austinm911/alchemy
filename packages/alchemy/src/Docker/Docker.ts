@@ -581,15 +581,15 @@ export const DockerLive = Layer.effect(
         ),
       ),
       container: {
-        create: ({ image, env, command, context, ...options }) =>
+        create: ({ image, command, context, ...options }) =>
           run([
             ...formatArgs({ context }),
             "container",
             "create",
-            ...formatArgs({
-              ...options,
-              env: env ? Object.keys(env) : undefined,
-            }),
+            // `env` stays a record so `formatArgs` emits `--env KEY=value`.
+            // Passing only the keys makes Docker inherit `KEY` from the host
+            // environment, which drops every configured value.
+            ...formatArgs(options),
             image,
             ...(command ?? []),
           ]),
@@ -884,6 +884,24 @@ export const dockerPhysicalName = (
         maxLength,
         lowercase: true,
       });
+
+/**
+ * Renders a healthcheck command for `--health-cmd`.
+ *
+ * Docker wraps a `--health-cmd` value in `CMD-SHELL` itself, so a caller who
+ * writes the Docker-native `["CMD-SHELL", "..."]` or `["CMD", ...]` form would
+ * otherwise get the directive doubled into the shell command — a probe that
+ * always exits 127 with `CMD-SHELL: not found`. Both forms are accepted and
+ * the leading directive is dropped.
+ */
+export const dockerHealthCmd = (
+  cmd: Array<string> | string | undefined,
+): string | undefined => {
+  if (cmd === undefined) return undefined;
+  if (!Array.isArray(cmd)) return cmd;
+  const [first, ...rest] = cmd;
+  return (first === "CMD-SHELL" || first === "CMD" ? rest : cmd).join(" ");
+};
 
 /** Constructs a PlatformError from a command execution result. */
 const systemError = (input: {

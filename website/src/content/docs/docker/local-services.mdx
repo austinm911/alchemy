@@ -98,11 +98,11 @@ const postgres = yield* Docker.Container("postgres", {
   },
   ports: [{ external: 15432, internal: 5432 }],
   volumes: [
-    { hostPath: data.name, containerPath: "/var/lib/postgresql/data" },
+    { hostPath: data.name, containerPath: "/var/lib/postgresql" },
   ],
   networks: [{ name: network.name, aliases: ["postgres"] }],
   healthcheck: {
-    cmd: ["CMD-SHELL", "pg_isready -U alchemy -d app"],
+    cmd: ["pg_isready", "-U", "alchemy", "-d", "app"],
     interval: "5 seconds",
     timeout: "5 seconds",
     retries: 10,

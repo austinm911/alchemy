@@ -9,6 +9,7 @@ import {
 import * as Test from "@/Test/Alchemy";
 import { describe, expect } from "alchemy-test";
 import * as Effect from "effect/Effect";
+import * as Redacted from "effect/Redacted";
 import { findAvailablePort, isDockerReady } from "./Runtime.ts";
 
 const { test } = Test.make({
@@ -379,6 +380,36 @@ describe("Docker.Container", { concurrent: false }, () => {
         expect(health?.Timeout).toBe(2_000_000_000);
         expect(health?.Retries).toBe(3);
         expect(health?.StartPeriod).toBe(1_000_000_000);
+      }),
+  );
+
+  test.provider.skipIf(!isDockerReady)(
+    "applies environment values and a Docker-native healthcheck directive",
+    (stack) =>
+      Effect.gen(function* () {
+        const docker = yield* Docker.Docker;
+        const container = yield* stack.deploy(
+          Docker.Container("environment-container", {
+            image: "nginx:alpine",
+            environment: {
+              PLAIN: "value",
+              SECRET: Redacted.make("s3cret"),
+            },
+            healthcheck: {
+              // Docker's own healthcheck spelling. Docker wraps the value in
+              // CMD-SHELL itself, so the directive must not reach the command.
+              cmd: ["CMD-SHELL", "true"],
+              interval: "1 second",
+            },
+            start: true,
+          }),
+        );
+        const info = yield* docker.container.inspect(container.name);
+        // A bare `--env NAME` leaves these as valueless names and the
+        // configured values are silently lost.
+        expect(info?.Config.Env).toContain("PLAIN=value");
+        expect(info?.Config.Env).toContain("SECRET=s3cret");
+        expect(info?.Config.Healthcheck?.Test).toEqual(["CMD-SHELL", "true"]);
       }),
   );
 });

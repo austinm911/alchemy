@@ -9,7 +9,12 @@ import * as Provider from "../Provider.ts";
 import { Resource } from "../Resource.ts";
 import { createInternalTags, hasAlchemyTags } from "../Tags.ts";
 import { toSeconds } from "../Util/Duration.ts";
-import { Docker, dockerContextName, dockerPhysicalName } from "./Docker.ts";
+import {
+  Docker,
+  dockerContextName,
+  dockerHealthCmd,
+  dockerPhysicalName,
+} from "./Docker.ts";
 import type { Providers } from "./Providers.ts";
 
 export interface ContainerProps {
@@ -86,7 +91,11 @@ export declare namespace Container {
     aliases?: string[];
   }
   interface Healthcheck {
-    /** Command to run for health checks. */
+    /**
+     * Command to run for health checks. Docker runs it through a shell, so a
+     * leading Docker-native `"CMD-SHELL"` or `"CMD"` directive is optional and
+     * is dropped.
+     */
     cmd: string[] | string;
     /** Time between checks. */
     interval?: Duration.Input;
@@ -168,7 +177,7 @@ export interface Container extends Resource<
  *   name: postgresName,
  *   image: "postgres:18-alpine",
  *   ports: [{ external: 15432, internal: 5432 }],
- *   volumes: [{ hostPath: data.name, containerPath: "/var/lib/postgresql/data" }],
+ *   volumes: [{ hostPath: data.name, containerPath: "/var/lib/postgresql" }],
  *   networks: [{ name: network.name, aliases: ["postgres"] }],
  *   start: true,
  * });
@@ -427,9 +436,7 @@ const makeCreateArgs = (id: string, news: ContainerProps, instanceId: string) =>
         rm: news.removeOnExit ?? false,
         ...(news.healthcheck
           ? {
-              "health-cmd": Array.isArray(news.healthcheck.cmd)
-                ? news.healthcheck.cmd.join(" ")
-                : news.healthcheck.cmd,
+              "health-cmd": dockerHealthCmd(news.healthcheck.cmd),
               "health-interval": normalizeDuration(news.healthcheck.interval),
               "health-timeout": normalizeDuration(news.healthcheck.timeout),
               "health-retries": news.healthcheck.retries ?? 0,
