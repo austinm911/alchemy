@@ -177,8 +177,10 @@
       "frameworks": {
         "@astrojs/internal-helpers": "0.10.1",
         "@astrojs/underscore-redirects": "1.0.3",
-        "@octanejs/adapter-cloudflare": "0.0.12",
-        "@octanejs/vite-plugin": "0.1.22",
+        "@octanejs/adapter-cloudflare": "0.0.19",
+        "@octanejs/tanstack-router": "0.1.28",
+        "@octanejs/tanstack-start": "0.1.18",
+        "@octanejs/vite-plugin": "0.1.29",
         "@opennextjs/cloudflare": "1.20.1",
         "@sveltejs/kit": "3.0.0-next.9",
         "@sveltejs/vite-plugin-svelte": "^7.2.0",
@@ -187,7 +189,7 @@
         "next": "16.2.10",
         "nitropack": "2.13.4",
         "nuxt": "4.5.1",
-        "octane": "0.1.22",
+        "octane": "0.1.29",
         "svelte": "^5.56.6",
         "vocs": "2.8.2",
         "waku": "1.0.0-beta.7"

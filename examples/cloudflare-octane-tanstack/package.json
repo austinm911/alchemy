@@ -1,0 +1,32 @@
+{
+  "name": "example-cloudflare-octane-tanstack",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "alchemy dev",
+    "build": "vite build",
+    "deploy": "alchemy deploy",
+    "destroy": "alchemy destroy",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@octanejs/tanstack-router": "catalog:frameworks",
+    "@octanejs/tanstack-start": "catalog:frameworks",
+    "alchemy": "workspace:*",
+    "effect": "catalog:",
+    "octane": "catalog:frameworks",
+    "vite": "^8.0.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "catalog:",
+    "typescript": "catalog:"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alchemy-run/alchemy.git",
+    "directory": "examples/cloudflare-octane-tanstack"
+  }
+}
