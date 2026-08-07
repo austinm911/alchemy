@@ -1,6 +1,7 @@
 import * as Alchemy from "alchemy";
 import * as Cloudflare from "alchemy/Cloudflare";
 import * as Effect from "effect/Effect";
+import Backend, { Bucket } from "./src/backend.ts";
 
 // KV namespace backing the `/counter` server function. Declared at module
 // scope so the Website class can reference it as a binding; the stack
@@ -13,6 +14,8 @@ export class Website extends Cloudflare.Website.Vite<Website>()("Website", {
   },
   env: {
     CACHE: Cache,
+    BUCKET: Bucket,
+    BACKEND: Backend,
   },
   assets: {
     // Octane's Start server entry has no `env.ASSETS.fetch(request)`
@@ -33,10 +36,13 @@ export default Alchemy.Stack(
   },
   Effect.gen(function* () {
     const cache = yield* Cache;
+    const bucket = yield* Bucket;
+    const backend = yield* Backend;
     const website = yield* Website;
 
     return {
       url: website.url.as<string>(),
+      backendUrl: backend.url.as<string>(),
     };
   }),
 );

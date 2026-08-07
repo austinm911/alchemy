@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root.tsrx'
 import { Route as IndexRouteImport } from './routes/index.tsrx'
 import { Route as CounterRouteImport } from './routes/counter.tsrx'
+import { Route as ApiHelloRouteImport } from './routes/api.hello.ts'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -22,31 +23,40 @@ const CounterRoute = CounterRouteImport.update({
   path: '/counter',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiHelloRoute = ApiHelloRouteImport.update({
+  id: '/api/hello',
+  path: '/api/hello',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/counter': typeof CounterRoute
+  '/api/hello': typeof ApiHelloRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/counter': typeof CounterRoute
+  '/api/hello': typeof ApiHelloRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/counter': typeof CounterRoute
+  '/api/hello': typeof ApiHelloRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/counter'
+  fullPaths: '/' | '/counter' | '/api/hello'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/counter'
-  id: '__root__' | '/' | '/counter'
+  to: '/' | '/counter' | '/api/hello'
+  id: '__root__' | '/' | '/counter' | '/api/hello'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   CounterRoute: typeof CounterRoute
+  ApiHelloRoute: typeof ApiHelloRoute
 }
 
 declare module '@octanejs/tanstack-router' {
@@ -65,12 +75,20 @@ declare module '@octanejs/tanstack-router' {
       preLoaderRoute: typeof CounterRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/hello': {
+      id: '/api/hello'
+      path: '/api/hello'
+      fullPath: '/api/hello'
+      preLoaderRoute: typeof ApiHelloRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   CounterRoute: CounterRoute,
+  ApiHelloRoute: ApiHelloRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
