@@ -1,5 +1,19 @@
 import { tanstackStart } from "@octanejs/tanstack-start/plugin/vite";
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
+
+// `cloudflare:*` modules are workerd runtime modules, not npm packages, so
+// plain Vite/Rolldown cannot resolve them. Alchemy injects its own Cloudflare
+// Vite plugin for `alchemy dev`/`deploy`; this plugin keeps standalone
+// `vite build` working by externalizing them the same way (workerd provides
+// them at runtime).
+const cloudflareExternals = (): Plugin => ({
+  name: "cloudflare-externals",
+  resolveId(id) {
+    if (id.startsWith("cloudflare:")) {
+      return { id, external: true };
+    }
+  },
+});
 
 // Packages that reference the Start plugin's virtual modules
 // (`#tanstack-start-entry` / `#tanstack-router-entry`). `alchemy dev`
@@ -14,6 +28,7 @@ const START_DEPS = [
 
 export default defineConfig({
   plugins: [
+    cloudflareExternals(),
     tanstackStart({
       server: {
         entry: "./server.ts",
