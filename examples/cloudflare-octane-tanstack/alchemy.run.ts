@@ -18,11 +18,12 @@ export class Website extends Cloudflare.Website.Vite<Website>()("Website", {
     BACKEND: Backend,
   },
   assets: {
-    // Octane's Start server entry has no `env.ASSETS.fetch(request)`
-    // fallthrough, so worker-first routing would shadow the client bundle
-    // with SSR 404 HTML and the app would never hydrate. Asset-first lets
-    // static files win while navigation misses still reach SSR.
-    runWorkerFirst: false,
+    // `src/server.ts` provides a custom Start entry with an
+    // `env.ASSETS.fetch(request)` fallthrough for non-route requests.
+    // Worker-first routing is therefore safe: the client bundle and dev
+    // modules reach the assets layer (vite in dev), while page requests
+    // reach SSR.
+    runWorkerFirst: true,
   },
 }) {}
 

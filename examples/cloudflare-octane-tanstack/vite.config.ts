@@ -13,7 +13,13 @@ const START_DEPS = [
 ];
 
 export default defineConfig({
-  plugins: [tanstackStart()],
+  plugins: [
+    tanstackStart({
+      server: {
+        entry: "./server.ts",
+      },
+    }),
+  ],
   optimizeDeps: {
     exclude: START_DEPS,
   },
