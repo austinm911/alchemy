@@ -44,10 +44,19 @@ function RootLayout() @{
         color: "#fff",
       }}
     >
-      <Link to="/" activeOptions={{ exact: true }} activeProps={{ style: { fontWeight: 700 } }}>
+      <Link
+        to="/"
+        activeOptions={{ exact: true }}
+        activeProps={{ style: { fontWeight: 700 } }}
+        style={{ color: "#fff", textDecoration: "none" }}
+      >
         Home
       </Link>
-      <Link to="/counter" activeProps={{ style: { fontWeight: 700 } }}>
+      <Link
+        to="/counter"
+        activeProps={{ style: { fontWeight: 700 } }}
+        style={{ color: "#fff", textDecoration: "none" }}
+      >
         Counter
       </Link>
     </nav>
