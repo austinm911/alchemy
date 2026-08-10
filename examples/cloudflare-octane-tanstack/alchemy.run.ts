@@ -17,14 +17,6 @@ export class Website extends Cloudflare.Website.Vite<Website>()("Website", {
     BUCKET: Bucket,
     BACKEND: Backend,
   },
-  assets: {
-    // `src/server.ts` provides a custom Start entry with an
-    // `env.ASSETS.fetch(request)` fallthrough for non-route requests.
-    // Worker-first routing is therefore safe: the client bundle and dev
-    // modules reach the assets layer (vite in dev), while page requests
-    // reach SSR.
-    runWorkerFirst: true,
-  },
 }) {}
 
 export type WebsiteEnv = Cloudflare.InferEnv<typeof Website>;

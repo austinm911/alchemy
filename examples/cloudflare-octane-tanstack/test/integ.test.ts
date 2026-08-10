@@ -87,6 +87,25 @@ test(
 );
 
 test(
+  "serves the client bundle as JavaScript",
+  Effect.gen(function* () {
+    const { url } = yield* stack;
+    const client = yield* HttpClient.HttpClient;
+
+    const page = yield* getWhenReady(`${url}/`);
+    const html = yield* page.text;
+    const script = html.match(/<script[^>]+src="(\/[^"]+\.js[^"]*)"/i)?.[1];
+    expect(script).toBeDefined();
+
+    const asset = yield* client.get(`${url}${script!}`);
+    expect(asset.status).toBe(200);
+    expect(asset.headers["content-type"]).toContain("javascript");
+    expect(yield* asset.text).not.toContain("<html");
+  }),
+  { timeout: 120_000 },
+);
+
+test(
   "counter server function increments the KV binding across requests",
   Effect.gen(function* () {
     const { url } = yield* stack;
@@ -201,16 +220,14 @@ test(
     // Seed the bucket via option 1 (direct binding) so the RPC `hello`
     // method has something to read.
     const seed = yield* executeWhenReady(
-      HttpClientRequest.put(
-        route(url, { key, via: "http-client" }),
-      ).pipe(HttpClientRequest.bodyText("hello-http-client", "text/plain")),
+      HttpClientRequest.put(route(url, { key, via: "http-client" })).pipe(
+        HttpClientRequest.bodyText("hello-http-client", "text/plain"),
+      ),
     );
     expect(seed.status).toBe(204);
 
     // HTTP client GET reads through Backend.hello — exercises toPromiseApi.
-    const get = yield* client.get(
-      route(url, { key, via: "http-client" }),
-    );
+    const get = yield* client.get(route(url, { key, via: "http-client" }));
     expect(get.status).toBe(200);
     expect(yield* get.text).toBe("hello-http-client");
   }),
