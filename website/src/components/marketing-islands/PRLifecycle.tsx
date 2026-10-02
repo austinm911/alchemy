@@ -9,10 +9,19 @@ import {
 } from "react";
 import { prefersReducedMotion, useSpinner } from "./_terminal";
 import { yantraSvg } from "../../brand/yantra";
+import {
+  AgentPane,
+  EDIT_MS,
+  EditorPane,
+  LIVE_SPEED,
+  LOCAL_MS,
+} from "./LocalLoop";
 import "./PRLifecycle.css";
 
 /*
- * PR preview lifecycle, mirroring the CI workflow in the Cloudflare
+ * The full picture, from an edit to production. The first two steps run on
+ * your machine (see LocalLoop.tsx); the rest is the PR preview lifecycle,
+ * mirroring the CI workflow in the Cloudflare
  * tutorial (part 5): a pull request deploys `--stage pr-N` and tests it,
  * the stack posts the preview URL as a PR comment, and merging runs the
  * `prod` deploy and the preview cleanup in parallel.
@@ -25,14 +34,22 @@ import "./PRLifecycle.css";
  * can be jumped to directly from the tab bar.
  */
 
-type StepId = "open" | "deploy" | "test" | "merge";
+type StepId = "edit" | "local" | "open" | "deploy" | "test" | "merge";
 type Status = "queued" | "running" | "success";
 
 const STEPS: { id: StepId; label: string; ms: number }[] = [
+  { id: "edit", label: "Edit", ms: EDIT_MS },
+  { id: "local", label: "Iterate locally", ms: LOCAL_MS },
   { id: "open", label: "PR opened", ms: 2600 },
   { id: "deploy", label: "Deploy", ms: 14550 },
   { id: "test", label: "Test", ms: 10500 },
   { id: "merge", label: "Merge", ms: 11300 },
+];
+
+// The tab bar's headers. Each fills as the animation moves through its steps.
+const GROUPS = [
+  { label: "Your machine", steps: 2 },
+  { label: "CI/CD", steps: 4 },
 ];
 
 const PR = 147;
@@ -167,6 +184,47 @@ const phaseAt = (phases: Phase[], t: number) =>
 /** Seconds since `from`, ticking so long waits visibly move. */
 const secs = (t: number, from: number) =>
   `${Math.max(0, (t - from) / 1000).toFixed(1)}s`;
+
+/**
+ * How each step's timing relates to a real run, shown under the tab bar.
+ * The measured numbers come from one run of examples/cloudflare-preview-
+ * benchmark (see the constants above).
+ */
+const TIMING: Record<
+  StepId,
+  { badge: string; tone: "real" | "scaled" | "staged"; note: string }
+> = {
+  edit: {
+    badge: "Staged",
+    tone: "staged",
+    note: "The agent's typing is staged. The type check itself answers in milliseconds.",
+  },
+  local: {
+    badge: `Measured · ${LIVE_SPEED}× speed`,
+    tone: "scaled",
+    note: "The live test replays a measured deploy (13.4s) and destroy (4.8s), played at double speed.",
+  },
+  open: {
+    badge: "Setup shortened",
+    tone: "staged",
+    note: "Checkout and install are sped up; they aren't part of what Alchemy does.",
+  },
+  deploy: {
+    badge: "Real time",
+    tone: "real",
+    note: "A measured preview deploy: 13.4s for three resources and a GitHub comment, then 0.9s until the URL answers.",
+  },
+  test: {
+    badge: `Real time · tests ${TEST_SLOWDOWN}× slower`,
+    tone: "scaled",
+    note: "A measured 4.8s run. The three tests take about 0.3s each, so they are slowed down to be readable.",
+  },
+  merge: {
+    badge: "Real time",
+    tone: "real",
+    note: "Measured: prod deploys as an update in 7.6s while the preview is destroyed in 4.8s.",
+  },
+};
 
 /** While paused, spinners hold their frame like everything else. */
 const PausedContext = createContext(false);
@@ -311,44 +369,74 @@ export default function PRLifecycle() {
         data-nosnippet=""
       >
         <div className="prf-tabs-row">
-          <div
-            className="prf-tabs"
-            ref={tabsRef}
-            role="tablist"
-            aria-label="Pull request lifecycle"
-          >
-            {STEPS.map((s, i) => (
-              <button
-                key={s.id}
-                type="button"
-                role="tab"
-                id={`prf-tab-${s.id}`}
-                aria-controls="prf-panel"
-                aria-selected={i === step}
-                tabIndex={i === step ? 0 : -1}
-                className={`prf-tab ${i === step ? "is-active" : i < step ? "is-done" : ""}`}
-                onClick={() => go(i)}
-                onKeyDown={onTabKey}
-              >
-                <span className="prf-tab__num">{i + 1}</span>
-                <span className="prf-tab__label">{s.label}</span>
-              </button>
-            ))}
-            <span className="prf-tabs__track" aria-hidden>
-              <span
-                className="prf-tabs__progress"
-                style={{
-                  transform: `scaleX(${(step + Math.min(elapsed, dur) / dur) / STEPS.length})`,
-                }}
-              />
-            </span>
-            {pill && (
-              <span
-                className="prf-tabs__pill"
-                aria-hidden
-                style={{ left: pill.left, width: pill.width }}
-              />
-            )}
+          <div className="prf-tabs-col">
+            <div className="prf-groups" aria-hidden>
+              {GROUPS.map((g, gi) => {
+                const first = GROUPS.slice(0, gi).reduce(
+                  (n, x) => n + x.steps,
+                  0,
+                );
+                const done = Math.min(
+                  g.steps,
+                  Math.max(0, step + Math.min(elapsed, dur) / dur - first),
+                );
+                const active = step >= first && step < first + g.steps;
+                return (
+                  <span
+                    key={g.label}
+                    className={`prf-group ${active ? "is-active" : done >= g.steps ? "is-done" : ""}`}
+                    style={{ gridColumn: `span ${g.steps}` }}
+                  >
+                    {g.label}
+                    <span className="prf-group__track">
+                      <span
+                        className="prf-group__fill"
+                        style={{ transform: `scaleX(${done / g.steps})` }}
+                      />
+                    </span>
+                  </span>
+                );
+              })}
+            </div>
+            <div
+              className="prf-tabs"
+              ref={tabsRef}
+              role="tablist"
+              aria-label="From an edit to production"
+            >
+              {STEPS.map((s, i) => (
+                <button
+                  key={s.id}
+                  type="button"
+                  role="tab"
+                  id={`prf-tab-${s.id}`}
+                  aria-controls="prf-panel"
+                  aria-selected={i === step}
+                  tabIndex={i === step ? 0 : -1}
+                  className={`prf-tab ${i === step ? "is-active" : i < step ? "is-done" : ""}`}
+                  onClick={() => go(i)}
+                  onKeyDown={onTabKey}
+                >
+                  <span className="prf-tab__num">{i + 1}</span>
+                  <span className="prf-tab__label">{s.label}</span>
+                </button>
+              ))}
+              <span className="prf-tabs__track" aria-hidden>
+                <span
+                  className="prf-tabs__progress"
+                  style={{
+                    transform: `scaleX(${(step + Math.min(elapsed, dur) / dur) / STEPS.length})`,
+                  }}
+                />
+              </span>
+              {pill && (
+                <span
+                  className="prf-tabs__pill"
+                  aria-hidden
+                  style={{ left: pill.left, width: pill.width }}
+                />
+              )}
+            </div>
           </div>
           <button
             type="button"
@@ -370,31 +458,57 @@ export default function PRLifecycle() {
           </button>
         </div>
 
+        <div className={`prf-timing prf-timing--${TIMING[id].tone}`}>
+          <span className="prf-timing__badge">
+            <span className="prf-timing__dot" aria-hidden />
+            {TIMING[id].badge}
+          </span>
+          {id === "deploy" && (
+            <span className="prf-timing__clock">
+              {secs(Math.min(t, T_DEPLOYED), 0)}
+            </span>
+          )}
+          <span className="prf-timing__note">{TIMING[id].note}</span>
+        </div>
+
         <div
           className="prf-stage"
           id="prf-panel"
           role="tabpanel"
           aria-labelledby={`prf-tab-${id}`}
         >
-          <div className="prf-side">
-            <PullRequest
-              id={id}
-              t={t}
-              merged={merged}
-              previewStatus={previewStatus}
-              testStatus={testStatus}
-              cleanupStatus={cleanupStatus}
-              showComment={showComment}
-              tab={
-                id === "test" && t >= T_TAB_OPEN && t < T_TAB_GONE
-                  ? { t, closing: t >= T_TAB_CLOSE }
-                  : null
-              }
-            />
-          </div>
-          <div className="prf-right">
-            <Actions id={id} t={t} />
-          </div>
+          {id === "edit" || id === "local" ? (
+            <>
+              <div className="prf-side">
+                <EditorPane id={id} t={t} />
+              </div>
+              <div className="prf-right">
+                <AgentPane id={id} t={t} paused={!playing} />
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="prf-side">
+                <PullRequest
+                  id={id}
+                  t={t}
+                  merged={merged}
+                  previewStatus={previewStatus}
+                  testStatus={testStatus}
+                  cleanupStatus={cleanupStatus}
+                  showComment={showComment}
+                  tab={
+                    id === "test" && t >= T_TAB_OPEN && t < T_TAB_GONE
+                      ? { t, closing: t >= T_TAB_CLOSE }
+                      : null
+                  }
+                />
+              </div>
+              <div className="prf-right">
+                <Actions id={id} t={t} />
+              </div>
+            </>
+          )}
         </div>
       </div>
     </PausedContext.Provider>
@@ -419,9 +533,18 @@ function Win({
   return (
     <div className={`prf-win ${className}`}>
       <div className="prf-win__bar">
-        <span className="prf-dot" style={{ background: "var(--alc-danger)" }} />
-        <span className="prf-dot" style={{ background: "var(--alc-warn)" }} />
-        <span className="prf-dot" style={{ background: GREEN }} />
+        <span
+          className="prf-dot"
+          style={{ background: "var(--alc-dot-red)" }}
+        />
+        <span
+          className="prf-dot"
+          style={{ background: "var(--alc-dot-yellow)" }}
+        />
+        <span
+          className="prf-dot"
+          style={{ background: "var(--alc-dot-green)" }}
+        />
         <span className="prf-win__title">{title}</span>
         {badge && (
           <span className={`prf-badge prf-badge--${badge.tone}`}>
@@ -1027,9 +1150,18 @@ function PullRequest({
   return (
     <div className="prf-win prf-pr">
       <div className="prf-win__bar prf-win__bar--tabs">
-        <span className="prf-dot" style={{ background: "var(--alc-danger)" }} />
-        <span className="prf-dot" style={{ background: "var(--alc-warn)" }} />
-        <span className="prf-dot" style={{ background: GREEN }} />
+        <span
+          className="prf-dot"
+          style={{ background: "var(--alc-dot-red)" }}
+        />
+        <span
+          className="prf-dot"
+          style={{ background: "var(--alc-dot-yellow)" }}
+        />
+        <span
+          className="prf-dot"
+          style={{ background: "var(--alc-dot-green)" }}
+        />
         <span className={`prf-btab ${tab ? "" : "is-active"}`}>
           <PrIcon />
           Add image upload… #{PR}
