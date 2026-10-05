@@ -71,7 +71,7 @@ export const makeWriteR2HttpClient = (
               const meta = readHttpMetadata(options);
               const byteLength = Match.value(body).pipe(
                 Match.when(Match.string, (value) => new TextEncoder().encode(value).byteLength),
-                Match.when(Match.instanceOf(Blob), (value) => value.size),
+                Match.when({ size: Match.number }, (value) => value.size),
                 Match.orElse((value) => value.byteLength),
               );
               const validateLength = Effect.void.pipe(
