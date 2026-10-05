@@ -14,6 +14,8 @@ import { makeReadR2HttpClient } from "./ReadBucketHttp.ts";
  * Provide it on an {@link Action} (or any deploy-time Effect) to read a bucket
  * with the same `head`/`get`/`list` client you'd use inside a Worker.
  *
+ * Remote HTTP reads reject range, conditional, and SSE-C options.
+ *
  * @example Reading an object from an Action
  * ```typescript
  * const Read = Alchemy.Action(

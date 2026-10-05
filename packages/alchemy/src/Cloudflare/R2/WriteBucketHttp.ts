@@ -1,6 +1,7 @@
 import * as r2 from "@distilled.cloud/cloudflare/r2";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { authorizeWith } from "../HttpClientUtils.ts";
 import {
@@ -13,12 +14,15 @@ import {
   type R2Auth,
 } from "./BucketHttp.ts";
 import { R2Error, type PutOptions } from "./BucketTypes.ts";
+import { validateHttpPutOptions } from "./HttpOptions.ts";
 import { WriteBucket, type WriteBucketClient } from "./WriteBucket.ts";
 
 /**
  * HTTP-backed implementation of the {@link WriteBucket} binding.
  *
- * It creates a scoped {@link AccountApiToken} with the `Workers R2 Storage Read` and `Workers R2 Storage Write` permissions.
+ * It creates a scoped token with `Workers R2 Storage Write` permission.
+ * HTTP put supports contentLength, storageClass, and HTTP metadata except contentType contentType, and cacheExpiry.
+ * Custom metadata, conditions, checksums, and SSE-C options fail before body consumption.
  */
 export const WriteBucketHttp = Layer.effect(
   WriteBucket,
@@ -45,7 +49,7 @@ export const makeWriteR2HttpClient = (
   const scope = makeR2HttpScope(auth.accountId, bucketName, jurisdiction);
 
   return {
-    put: ((
+    put: (
       key: string,
       value:
         | ReadableStream
@@ -57,7 +61,8 @@ export const makeWriteR2HttpClient = (
         | Stream.Stream<Uint8Array, unknown>,
       options?: PutOptions,
     ) =>
-      scope.pipe(
+      validateHttpPutOptions(options).pipe(
+        Effect.andThen(scope),
         Effect.flatMap(({ accountId, bucketName, cfR2Jurisdiction }) =>
           toBody(value).pipe(
             Effect.flatMap(({ body, contentLength }) => {
@@ -80,26 +85,21 @@ export const makeWriteR2HttpClient = (
                       : contentLength != null
                         ? String(contentLength)
                         : undefined,
-                  cfR2StorageClass: (options as { storageClass?: string } | undefined)
-                    ?.storageClass,
+                  cfR2StorageClass: options?.storageClass,
                 }),
               ).pipe(
-                Effect.map(() =>
-                  baseObject(key, meta ?? {}, {
-                    size: contentLength,
-                    customMetadata: (
-                      options as { customMetadata?: Record<string, string> } | undefined
-                    )?.customMetadata,
-                    storageClass: (options as { storageClass?: string } | undefined)?.storageClass,
-                    uploaded: new Date(),
-                  }),
-                ),
+                Effect.flatMap(Schema.decodeUnknownEffect(UploadAcknowledgement)),
+                Effect.map((response) => ({
+                  ...baseObject(response.key, {}, response),
+                  version: response.version,
+                  httpEtag: `"${response.etag.replace(/^"|"$/g, "")}"`,
+                })),
               );
             }),
           ),
         ),
         Effect.mapError(toR2Error),
-      )) as any,
+      ),
     delete: (keys: string | string[]) =>
       scope.pipe(
         Effect.flatMap(({ accountId, bucketName, cfR2Jurisdiction }) =>
@@ -145,3 +145,16 @@ export const makeWriteR2HttpClient = (
       ),
   };
 };
+
+const UploadAcknowledgement = Schema.Struct({
+  key: Schema.NonEmptyString,
+  size: Schema.NumberFromString.check(
+    Schema.isFinite(),
+    Schema.isInt(),
+    Schema.isGreaterThanOrEqualTo(0),
+  ),
+  etag: Schema.NonEmptyString,
+  uploaded: Schema.DateFromString,
+  version: Schema.NonEmptyString,
+  storageClass: Schema.NonEmptyString,
+});

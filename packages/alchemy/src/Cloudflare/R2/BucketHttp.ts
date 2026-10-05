@@ -161,21 +161,20 @@ export const baseObject = (
     storageClass?: string;
     customMetadata?: Record<string, string>;
   },
-): R2Object =>
-  ({
-    key,
-    version: "",
-    size: attrs.size ?? 0,
-    etag: stripQuotes(attrs.etag) ?? "",
-    httpEtag: attrs.etag ?? "",
-    checksums: {},
-    uploaded: attrs.uploaded ?? new Date(0),
-    httpMetadata: meta,
-    customMetadata: attrs.customMetadata ?? {},
-    range: undefined,
-    storageClass: attrs.storageClass ?? "Standard",
-    writeHttpMetadata: (headers: Headers) => Effect.sync(() => applyHttpMetadata(headers, meta)),
-  }) as unknown as R2Object;
+): R2Object => ({
+  key,
+  version: "",
+  size: attrs.size ?? 0,
+  etag: stripQuotes(attrs.etag) ?? "",
+  httpEtag: attrs.etag ?? "",
+  checksums: { toJSON: () => ({}) },
+  uploaded: attrs.uploaded ?? new Date(0),
+  httpMetadata: meta,
+  customMetadata: attrs.customMetadata ?? {},
+  range: undefined,
+  storageClass: attrs.storageClass ?? "Standard",
+  writeHttpMetadata: (headers: Headers) => Effect.sync(() => applyHttpMetadata(headers, meta)),
+});
 
 /** Collect a put `value` into a body accepted by the R2 HTTP API. */
 export const toBody = (

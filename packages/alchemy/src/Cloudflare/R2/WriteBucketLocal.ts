@@ -15,6 +15,9 @@ import { makeWriteR2HttpClient } from "./WriteBucketHttp.ts";
  * with the same `put`/`delete` client you'd use inside a Worker. Multipart
  * uploads are unsupported over the HTTP API (mirrors `WriteBucketHttp`).
  *
+ * Remote HTTP writes reject custom metadata, conditions, checksums, SSE-C,
+ * contentType, and cacheExpiry. Native local-emulator bindings retain their native options.
+ *
  * @example Seeding a bucket from an Action
  * ```typescript
  * const Seed = Alchemy.Action(

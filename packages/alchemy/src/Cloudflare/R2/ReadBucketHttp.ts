@@ -12,12 +12,14 @@ import {
   type R2Auth,
 } from "./BucketHttp.ts";
 import { R2Error, type GetOptions, type ListOptions, type Objects } from "./BucketTypes.ts";
+import { validateHttpGetOptions } from "./HttpOptions.ts";
 import { ReadBucket, type ReadBucketClient } from "./ReadBucket.ts";
 
 /**
  * HTTP-backed implementation of the {@link ReadBucket} binding.
  *
- * It creates a scoped {@link AccountApiToken} with the `Workers R2 Storage Read` and `Workers R2 Storage Write` permissions.
+ * It creates a scoped token with `Workers R2 Storage Read` permission.
+ * HTTP get rejects range, conditional, and SSE-C options before making a request.
  */
 export const ReadBucketHttp = Layer.effect(
   ReadBucket,
@@ -76,8 +78,9 @@ export const makeReadR2HttpClient = (
         Effect.catchTag("NoSuchKey", () => Effect.succeed(null)),
         Effect.mapError(toR2Error),
       ),
-    get: ((key: string, _options?: GetOptions) =>
-      scope.pipe(
+    get: ((key: string, options?: GetOptions) =>
+      validateHttpGetOptions(options).pipe(
+        Effect.andThen(scope),
         Effect.flatMap(({ accountId, bucketName, cfR2Jurisdiction }) =>
           authorize(
             r2.getObject({
