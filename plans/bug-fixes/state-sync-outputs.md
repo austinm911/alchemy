@@ -1,87 +1,32 @@
-# docs(plan): synchronize stack outputs across state stores
+# Stack-output synchronization and state protocol migration
 
-This draft proposes a complete mirror of resource records and stack outputs. `syncState` currently copies resource rows but never copies or clears outputs. A fresh destination loses cross-stack outputs, while an existing destination retains stale values. [Sync source](https://github.com/austinm911/alchemy/blob/6c7e69114c0bd9cea2de2eb04b004631b041bb08/packages/alchemy/src/State/Sync.ts#L46), [cross-stack consumer](https://github.com/austinm911/alchemy/blob/6c7e69114c0bd9cea2de2eb04b004631b041bb08/packages/alchemy/src/Output.ts#L640)
+State synchronization now mirrors resource records and outputs together. It snapshots all source resource records and the source output before mutating each stage, removes destination-only resources/stages, writes present outputs, and deletes absent outputs. Errors propagate even if earlier destination writes succeeded. Source and destination must be quiescent or externally coordinated. This is not a transactional snapshot across stages.
 
-Astra reproduced both cases with the real state backend. This is a P2 public-utility defect. The proposal also covers output-only stages, which current in-memory and Cloudflare stage enumeration omit.
+`StateService.deleteOutput({ stack, stage })` is required, idempotent, and must preserve resources. All built-in adapters implement it. In-memory and Cloudflare enumeration now includes output-only stages. `undefined` means absent. Stored null, falsy scalars, arrays, and objects are preserved. This does not change `Output.stackRef`'s separate null policy. Empty container/directory identity is not portable across backends.
 
-### Proposed state contract
+## HTTP contract
 
-Add an idempotent output-only deletion operation. Preserve `undefined` as absence and preserve every stored value, including `null`, `0`, `false`, empty strings, arrays, and objects. Resource rows must survive output deletion.
+- `GET /state/capabilities` returns protocol version 6 and `output-presence-v1`, `delete-output-v1`, and `output-stage-enumeration-v1`.
+- `GET /v2/state/stacks/:stack/stages/:stage/output` returns `{ _tag: "Absent" }` or `{ _tag: "Present", value: encodedOutput }`.
+- `DELETE /state/stacks/:stack/stages/:stage/output` returns 204, including repeated deletion.
+- The original raw GET endpoint remains unchanged during the migration window.
 
-```ts
-// Proposed addition to StateService.
-deleteOutput(request: {
-  stack: string
-  stage: string
-}): Effect.Effect<void, StateStoreError>
-```
+The ordinary HTTP client checks all capabilities before listing, reading, or changing state. A successful check is cached per instance. Failed checks can be retried. `getVersion` remains available for bootstrap discovery. The generic wire protocol (6) and managed Cloudflare deployment revision (8) are distinct counters.
 
-```text
-for each selected stack:
-    discover stages from BOTH resource records and output records
-    for each stage in union(sourceStages, destinationStages):
-        if stage is absent from source:
-            destination.deleteStack({ stack, stage })
-            continue
+## Rollout and removal
 
-        sourceOutput = source.getOutput({ stack, stage })
-        decode/validate source data before changing this stage
-        synchronize resource rows in this stage
-        if sourceOutput is undefined:
-            destination.deleteOutput({ stack, stage })
-        else:
-            destination.setOutput({ stack, stage, value: sourceOutput })
-```
+1. Upgrade generic servers before generic clients. Existing clients keep their raw read endpoint during the compatibility window. Update custom StateService implementations to add output-only deletion in the same release.
+2. Before upgrading a shared managed Cloudflare worker, update every operator and CI runner and stop older bootstrap processes. Older managed clients can redeploy older worker versions. Mixed managed versions are unsafe even though the raw endpoint remains. A rolling mixed-version release requires a separate anti-downgrade release first.
+3. Set `ALCHEMY_STATE_STORE_V8_UPGRADE_READY=true` only after that rollout prerequisite is satisfied. The private bridge accepts only a positively identified v7 worker, is supplied only to its deployment, and explicitly rejects deleteOutput. It reads/writes the prior backend during the upgrade. Ordinary user stacks and sync never receive it.
+4. After deployment, capability readback constructs the normal client. Failed deployment or readback remains an error. No stored-data rewrite or delete/recreate migration is performed. The upgrade does not promise automatic worker rollback.
+5. Remove the deprecated raw read and private legacy bridge together in the next major state-protocol release after client migration and announced retirement. Keep additive endpoints through any client rollback.
 
-### HTTP compatibility
+## Verification and limits
 
-Use a new versioned output-read endpoint with an explicit presence envelope. Keep the existing raw-output endpoint unchanged during migration so old clients cannot mistake an envelope for application data.
+78 focused tests passed across sync, filesystem, PostgreSQL contracts, HTTP errors and output codecs, managed upgrade orchestration, and transient errors. Five additional tests passed against an isolated PostgreSQL 15 instance, including output-only deletion with surviving resources. The temporary database was stopped after the run.
 
-```text
-GET /state/capabilities
-  -> { protocolVersion: 6,
-       capabilities: ["output-presence-v1", "delete-output-v1",
-                      "output-stage-enumeration-v1"] }
+The HTTP tests use a real local server, production API schemas/client codecs, and fixture handlers. The managed-upgrade tests run the production orchestration with a callback that changes the fixture revision. They cover the rollout flag, failed deployment, state preservation, capability readback, and refusal to downgrade. They do not execute the Cloudflare Worker or Durable Object in a hosted account. Live Cloudflare upgrade and AWS S3 deletion remain unverified. Astra accepted the implementation with those evidence limits.
 
-GET /v2/state/stacks/:stack/stages/:stage/output
-  -> { _tag: "Absent" }
-  or { _tag: "Present", value: encodedOutput }
+The standard pnpm entrypoint is blocked by its configured package-manager release-age policy. Tests ran through the existing alchemy-test runner using a temporary preload that changes dynamic test import to synchronous require to preserve local collection context. No tracked runner or package-manager policy was changed. Targeted typechecking found no changed-file errors, but dependency and existing unrelated-source diagnostics prevent a clean project typecheck.
 
-DELETE /state/stacks/:stack/stages/:stage/output
-  -> 204, including when already absent
-```
-
-Negotiate this contract before normal HTTP state use. Give managed-store upgrades a private legacy bootstrap transport for reading the existing store while replacing its worker. Keep the protocol capability version separate from the managed Cloudflare deployment version. This proposes a required custom-adapter method and an additive server API, with the rollout and retirement sequence in the attached plan. It does not claim transactional synchronization or change null handling in `Output.stackRef`.
-
-## Implementation scope and validation
-
-Own the following implementation changes:
-
-- `packages/alchemy/src/State/State.ts`: required `deleteOutput` method and precise output/absence semantics.
-- `State/Sync.ts`: per-stage output synchronization and deletion of destination-only stages, using the selected-stack mutation boundary from the selection fix.
-- `State/InMemoryState.ts`: union resource/output stack and stage keys, and delete only the requested output.
-- `State/LocalState.ts`: remove only the output file, tolerate NotFound, and keep resource files intact. Never serialize undefined as a deletion substitute.
-- `State/PostgresState.ts`: delete only the stack-output row through the existing lease/guard path.
-- `AWS/StateStore/State.ts`: delete only the output object key, using the existing credentials and error mapping.
-- `State/HttpStateApi.ts` and `State/HttpStateStore.ts`: additive capabilities, versioned output presence read, output delete, and single boundary decode using a Schema.TaggedUnion.
-- `Cloudflare/StateStore/Store.ts` and `Cloudflare/StateStore/Api.ts`: enumerate output keys as well as resource keys, keep output-only stacks registered, implement output deletion and the new endpoints.
-- `Cloudflare/StateStore/State.ts`: preserve the old store while upgrading the worker through its existing state backend, using the narrowly scoped bootstrap transport described below.
-- State-store adapters, mocks, and wrappers implementing StateService must gain the required method. Keep the contract required rather than silently emulating deletion with stage destruction and reconstruction.
-
-The ordinary HTTP adapter memoizes a successful capability handshake per service instance before listing/reading/mutating state. Required capabilities include output-only enumeration, so sync cannot begin with incomplete listings. An older generic server produces a typed StateStoreError naming the unsupported contract before any mutation. Generic syncState never deploys a remote store.
-
-Managed Cloudflare currently upgrades its worker with that same old HTTP store as the deployment state backend. A mandatory handshake would otherwise block the upgrade itself. Add a private makeLegacyBootstrapStateStore adapter used only by Cloudflare/StateStore/State.ts when upgrading a positively identified v7 worker to v8. It uses the old raw endpoints, cannot be selected through the public factory, and fails explicitly on the new deleteOutput operation. It is never supplied to user stacks or syncState. The upgrade reads and writes the existing store rather than destroying or recreating it. After successful deployment and capability readback, construct the normal checked adapter. If the upgrade or handshake fails, report failure and retain the prior state. Remove this adapter with the old raw endpoint after the stated migration window.
-
-Compatibility sequence:
-
-1. Add the new endpoints and complete listing behavior to servers. Keep the old raw GET output endpoint's response shape unchanged. Stored resource/output values remain in their existing format.
-2. Update built-in HTTP clients to the new presence endpoint and capability check. Update custom StateService adapters in the same release to implement deleteOutput. The generic wire contract advances from 5 to 6, while the current managed Cloudflare deployment revision advances independently from 7 to 8. Never compare the two counters as if they had the same meaning.
-3. Upgrade generic servers before their clients. Existing generic clients keep using the raw endpoint during the compatibility window. Managed Cloudflare clients are different: older clients require an exact deployment-version match and can redeploy an older worker. Before the first shared-worker v8 upgrade, update every managed-store operator and CI runner to the compatible client and stop older bootstrap processes. Use the private legacy bootstrap adapter for the one-time v7-to-v8 upgrade. Do not claim mixed managed-client versions are safe. A rolling mixed-version deployment instead requires a separate anti-downgrade compatibility release first.
-4. Deprecate the old raw GET endpoint immediately. Remove it and makeLegacyBootstrapStateStore in the next major state-protocol release after supported clients have migrated and the removal is announced. No permanent legacy output path is intended.
-5. Rollback retains the additive endpoints until all new clients have rolled back. No stored-data rewrite or destructive state migration is needed.
-
-Validation must cover the public sync utility and each built-in adapter contract: source outputs copied, destination outputs overwritten, stale output removed when source is absent, output-only source stage discovered, destination-only stage fully deleted, excluded stacks untouched, and idempotent output deletion with surviving resources. Include null and all scalar falsy values, readonly collections, and encoded Date/Redacted values. Verify source decode/read failure before that stage mutates. Snapshot source output before writing destination records.
-
-Exercise old generic client/new server compatibility, new client/old server rejection before mutation, capability mismatch, and new client/new server null versus absence roundtrips with a real local HTTP server. Run a real local upgrade fixture with a v7 server and existing state, including an injected failed upgrade, to show bootstrap can proceed without losing that state and switches to the checked adapter afterward. Test the older-managed-client downgrade hazard and enforce the rollout prerequisite; preserving the old raw endpoint alone does not prevent it. Do not claim that a release updates existing servers atomically. Source and destination must be quiescent or externally coordinated during synchronization. If a later output write fails, prior resource writes may have occurred and the error must remain visible. Empty directory/container identity is not portable across backends. The guarantee is equality of resource and output records.
-
-The output change follows the selected-stack fix during implementation. The plan PRs themselves are independent documentation changes against the same review base.
+This PR depends on the selected-stack synchronization fix.

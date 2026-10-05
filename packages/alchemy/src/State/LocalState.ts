@@ -213,6 +213,7 @@ export const makeLocalState = () =>
           Effect.map((file) => parseState(file.toString())),
           recover,
         ),
+      deleteOutput: (request) => fs.remove(outputFile(request)).pipe(recover, Effect.asVoid),
       setOutput: (request) =>
         ensure(stageDir(request)).pipe(
           Effect.flatMap(() =>

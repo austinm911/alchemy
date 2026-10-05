@@ -38,7 +38,27 @@ type FetchStub = (input: string | URL | Request, init?: RequestInit) => Promise<
 /** Build an HttpClient layer whose transport is the given fetch stub. */
 const stubHttpClient = (stub: FetchStub) =>
   FetchHttpClient.layer.pipe(
-    Layer.provide(Layer.succeed(FetchHttpClient.Fetch, stub as typeof globalThis.fetch)),
+    Layer.provide(
+      Layer.succeed(
+        FetchHttpClient.Fetch,
+        Object.assign(
+          async (input: string | URL | Request, init?: RequestInit) => {
+            const path = new URL(input instanceof Request ? input.url : String(input)).pathname;
+            return path === "/state/capabilities"
+              ? Response.json({
+                  protocolVersion: 6,
+                  capabilities: [
+                    "output-presence-v1",
+                    "delete-output-v1",
+                    "output-stage-enumeration-v1",
+                  ],
+                })
+              : stub(input, init);
+          },
+          { preconnect: () => {} },
+        ),
+      ),
+    ),
   );
 
 const json = (body: unknown, status = 200) =>

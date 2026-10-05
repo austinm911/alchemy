@@ -57,6 +57,24 @@ const sampleState = {
 } as never;
 
 describe.skipIf(!runLive)("Postgres state store against real Postgres", { tags: ["local"] }, () => {
+  it.effect("deletes only the output and preserves null and falsy values", () =>
+    withLiveStore((store) =>
+      Effect.gen(function* () {
+        yield* store.deleteStack({ stack });
+        yield* store.set({ ...request, value: sampleState });
+        for (const value of [null, 0, false, "", { url: "fixture" }]) {
+          yield* store.setOutput({ ...request, value });
+          expect(yield* store.getOutput(request)).toEqual(value);
+          yield* store.deleteOutput(request);
+          yield* store.deleteOutput(request);
+          expect(yield* store.getOutput(request)).toBeUndefined();
+          expect(yield* store.get(request)).toBeDefined();
+        }
+        yield* store.deleteStack({ stack });
+      }),
+    ),
+  );
+
   it.effect("round-trips resource state through a real database", () =>
     withLiveStore((store) =>
       Effect.gen(function* () {
