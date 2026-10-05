@@ -49,6 +49,46 @@ describe("syncState", { tags: ["unit", "local"] }, () => {
       expect(yield* destination.listStacks()).toEqual(["app"]);
     }),
   );
+  it.effect("selection bounds copies and deletions and preserves excluded outputs", () =>
+    Effect.gen(function* () {
+      const row = resource("row", { value: "source" });
+      const old = resource("row", { value: "destination" });
+      const source = yield* InMemoryService({
+        app: { dev: { row } },
+        excluded: { dev: { row } },
+        newExcluded: { dev: { row } },
+      });
+      const destination = yield* InMemoryService(
+        {
+          app: { dev: { row: old } },
+          excluded: { dev: { row: old } },
+          destinationOnly: { dev: { row: old } },
+          selectedMissing: { dev: { row: old } },
+        },
+        { excluded: { dev: "keep" }, destinationOnly: { dev: false } },
+      );
+      yield* syncState(source, destination, {
+        stacks: ["app", "app", "selectedMissing", "unknown"],
+      });
+      yield* expectStage(destination, "app", "dev", { row });
+      yield* expectStage(destination, "excluded", "dev", { row: old });
+      yield* expectStage(destination, "destinationOnly", "dev", { row: old });
+      expect(yield* destination.listStacks()).toEqual(["app", "excluded", "destinationOnly"]);
+      expect(yield* destination.getOutput({ stack: "excluded", stage: "dev" })).toBe("keep");
+      expect(yield* destination.getOutput({ stack: "destinationOnly", stage: "dev" })).toBe(false);
+    }),
+  );
+
+  it.effect("empty selection never touches either service", () =>
+    Effect.gen(function* () {
+      const unreachable = new Proxy(yield* InMemoryService(), {
+        get() {
+          throw new Error("state service touched");
+        },
+      });
+      yield* syncState(unreachable, unreachable, { stacks: [] });
+    }),
+  );
 });
 
 const resource = (fqn: string, attr: Record<string, unknown>): ResourceState => ({
