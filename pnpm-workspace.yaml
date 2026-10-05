@@ -172,6 +172,7 @@ catalog:
   oxlint-tsgolint: "7.0.2003"
   pathe: "^2.0.3"
   pg: "^8.22.0"
+  ignore: "7.0.6"
   picomatch: "^4.0.4"
   postal-mime: "^2.4.3"
   postcss: "^8.4.49"

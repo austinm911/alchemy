@@ -421,6 +421,7 @@
     "@types/aws-lambda": "catalog:",
     "capnweb": "catalog:",
     "fflate": "catalog:",
+    "ignore": "catalog:",
     "libsodium-wrappers": "catalog:",
     "pathe": "catalog:",
     "picomatch": "catalog:",

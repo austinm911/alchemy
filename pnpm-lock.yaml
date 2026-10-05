@@ -570,6 +570,9 @@ catalogs:
     pg:
       specifier: ^8.22.0
       version: 8.23.0
+    ignore:
+      specifier: 7.0.6
+      version: 7.0.6
     picomatch:
       specifier: ^4.0.4
       version: 4.0.5
@@ -7068,6 +7071,9 @@ importers:
       fflate:
         specifier: 'catalog:'
         version: 0.8.3
+      ignore:
+        specifier: 'catalog:'
+        version: 7.0.6
       libsodium-wrappers:
         specifier: 'catalog:'
         version: 0.8.4

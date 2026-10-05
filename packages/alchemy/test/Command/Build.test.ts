@@ -1,6 +1,7 @@
 import { expect } from "alchemy-test";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
 import * as pathe from "pathe";
 import * as Command from "@/Command";
 import * as Test from "@/Test/Alchemy";
@@ -230,6 +231,45 @@ test.provider(
       );
       expect(build4.hash.input).toBe(build3.hash.input);
 
+      yield* stack.destroy();
+    }),
+  { tags: ["unit", "local"], timeout: 60000 },
+);
+
+test.provider(
+  "nested package builds respect ancestor gitignore scope",
+  (stack) =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fs.makeTempDirectoryScoped();
+      const cwd = path.join(root, "packages/app");
+      yield* fs.makeDirectory(path.join(root, ".git"));
+      yield* fs.makeDirectory(path.join(cwd, "src"), { recursive: true });
+      yield* fs.writeFileString(path.join(root, ".gitignore"), "/src/\ndist/\n*.ignored\n");
+      yield* fs.writeFileString(path.join(cwd, "package.json"), '{"name":"app"}');
+      yield* fs.writeFileString(path.join(cwd, "src/main.txt"), "version one");
+      const deploy = () =>
+        stack.deploy(
+          Command.Build("nested-build", {
+            cwd,
+            command: "mkdir -p dist && cp src/main.txt dist/main.txt",
+            shell: true,
+            outdir: "dist",
+          }),
+        );
+      yield* stack.destroy();
+      const first = yield* deploy();
+      expect(yield* fs.readFileString(path.join(cwd, "dist/main.txt"))).toBe("version one");
+      expect((yield* deploy()).hash).toEqual(first.hash);
+      yield* fs.writeFileString(path.join(cwd, "source.ignored"), "ignored change");
+      expect((yield* deploy()).hash).toEqual(first.hash);
+      yield* fs.writeFileString(path.join(cwd, "src/main.txt"), "version two");
+      const changed = yield* deploy();
+      expect(changed.hash.input).not.toBe(first.hash.input);
+      expect(yield* fs.readFileString(path.join(cwd, "dist/main.txt"))).toBe("version two");
+      yield* fs.writeFileString(path.join(cwd, "package.json"), '{"name":"app","changed":true}');
+      expect((yield* deploy()).hash.input).not.toBe(changed.hash.input);
       yield* stack.destroy();
     }),
   { tags: ["unit", "local"], timeout: 60000 },

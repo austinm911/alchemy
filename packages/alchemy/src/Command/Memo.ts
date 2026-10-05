@@ -4,10 +4,10 @@ import * as Path from "effect/Path";
 import type { PlatformError } from "effect/PlatformError";
 import { convertPathToPattern, glob } from "tinyglobby";
 import { dotAlchemyDirectory } from "../AlchemyContext.ts";
-import { gitignoreRulesToGlobs } from "../Util/gitignore-rules-to-globs.ts";
 import { isPathWithin } from "../Util/isPathWithin.ts";
 import { initialCwd } from "../Util/Node.ts";
 import { sha256, sha256Object } from "../Util/sha256.ts";
+import { gitIgnoreFiles } from "./GitIgnore.ts";
 
 /**
  * Controls which files are included in the content hash that determines
@@ -36,7 +36,7 @@ export interface MemoOptions {
   /**
    * Glob patterns to exclude from hashing. Paths are relative to the working directory.
    *
-   * @default gitignore rules collected from the working directory up to the repo root
+   * @default scoped .gitignore rules from the repository root and each visited directory
    */
   exclude?: string[];
   /**
@@ -52,7 +52,7 @@ export interface MemoOptions {
 interface ResolvedMemoOptions {
   cwd: string;
   include: string[];
-  exclude: string[];
+  exclude: string[] | undefined;
   lockfile: boolean;
 }
 
@@ -86,23 +86,6 @@ const Memo = Effect.gen(function* () {
     return yield* findUp(parent, filenames);
   });
 
-  const readGitIgnoreRules = Effect.fn(function* (
-    cwd: string,
-  ): Effect.fn.Return<string[], PlatformError> {
-    const rules = yield* fs.readFileString(path.join(cwd, ".gitignore")).pipe(
-      Effect.map((file) => file.split("\n")),
-      Effect.catchIf(
-        (error) => error._tag === "PlatformError" && error.reason._tag === "NotFound",
-        () => Effect.succeed([]),
-      ),
-    );
-    const parent = path.dirname(cwd);
-    if (parent === cwd || (yield* fs.exists(path.join(cwd, ".git")))) {
-      return rules;
-    }
-    return [...(yield* readGitIgnoreRules(parent)), ...rules];
-  });
-
   const resolveMemoOptions = Effect.fn(function* (
     cwd: string | undefined,
     options: MemoOptions,
@@ -120,12 +103,7 @@ const Memo = Effect.gen(function* () {
           ? path.relative(resolvedCwd, pattern).replaceAll("\\", "/")
           : pattern,
       ),
-      exclude:
-        options.exclude ??
-        (yield* readGitIgnoreRules(resolvedCwd).pipe(
-          Effect.map(gitignoreRulesToGlobs),
-          Effect.map((globs) => ["**/.git/**", ...globs]),
-        )),
+      exclude: options.exclude,
       lockfile: options.lockfile ?? !(options.exclude || options.include),
     };
   });
@@ -137,20 +115,29 @@ const Memo = Effect.gen(function* () {
     const excludeRuntime = !isPathWithin(dotAlchemy, options.cwd, runtimeBase);
     const [files, lockfile] = yield* Effect.all(
       [
-        Effect.promise(() =>
-          glob(options.include, {
-            cwd: options.cwd,
-            ignore: [
-              ...options.exclude,
-              ...(excludeRuntime
-                ? [`${convertPathToPattern(path.resolve(runtimeBase, dotAlchemy))}/**`]
-                : []),
-            ],
-            onlyFiles: true,
-            expandDirectories: false,
-            dot: true,
-          }),
-        ),
+        options.exclude === undefined
+          ? gitIgnoreFiles({
+              cwd: options.cwd,
+              include: options.include,
+              excludeDirectory: excludeRuntime ? path.resolve(runtimeBase, dotAlchemy) : undefined,
+            }).pipe(
+              Effect.provideService(FileSystem.FileSystem, fs),
+              Effect.provideService(Path.Path, path),
+            )
+          : Effect.promise(() =>
+              glob(options.include, {
+                cwd: options.cwd,
+                ignore: [
+                  ...(options.exclude ?? []),
+                  ...(excludeRuntime
+                    ? [`${convertPathToPattern(path.resolve(runtimeBase, dotAlchemy))}/**`]
+                    : []),
+                ],
+                onlyFiles: true,
+                expandDirectories: false,
+                dot: true,
+              }),
+            ),
         options.lockfile
           ? findUp(options.cwd, [
               "bun.lock",
@@ -211,7 +198,7 @@ const Memo = Effect.gen(function* () {
  * memo options. The hash changes if and only if the content of the matched
  * files changes, making it suitable for cache-busting build outputs.
  */
-export const hashDirectory = Effect.fn(function* (props: {
+export const hashDirectory = Effect.fn("Command.hashDirectory")(function* (props: {
   cwd?: string;
   memo?: MemoOptions;
 }): Effect.fn.Return<string, PlatformError, FileSystem.FileSystem | Path.Path> {
