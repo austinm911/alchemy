@@ -125,6 +125,60 @@ describe("R2 HTTP options", { tags: ["unit", "local"] }, () => {
       }).pipe(Effect.provide(runtime)),
     );
   }
+  it.effect("rejects inherited getters and nonenumerable unsupported options", () =>
+    Effect.gen(function* () {
+      class ReadOptions {
+        get onlyIf() {
+          return { etagMatches: "private-value" };
+        }
+      }
+      class WriteOptions {
+        get customMetadata() {
+          return { private: "private-value" };
+        }
+      }
+      class Metadata {
+        get cacheExpiry() {
+          return new Date(0);
+        }
+      }
+      const hidden: PutOptions = {};
+      Object.defineProperty(hidden, "onlyIf", { value: { etagMatches: "private-value" } });
+      const client = clients(response);
+      const effects = [
+        client.read.get("key", new ReadOptions()),
+        client.write.put("key", "body", new WriteOptions()),
+        client.write.put("key", "body", hidden),
+        client.write.put("key", "body", { httpMetadata: new Metadata() }),
+      ];
+      for (const effect of effects) {
+        const exit = yield* Effect.exit(effect);
+        expect(Exit.isFailure(exit)).toBe(true);
+        if (Exit.isFailure(exit)) expect(Cause.pretty(exit.cause)).toContain("does not support");
+      }
+      expect(client.scopes()).toBe(0);
+      expect(client.requests).toEqual([]);
+    }).pipe(Effect.provide(runtime)),
+  );
+  it.effect("validates supplied length in bytes before upload", () =>
+    Effect.gen(function* () {
+      const client = clients(response);
+      for (const body of [
+        "é",
+        new Uint8Array([1, 2]),
+        new Blob(["é"]),
+        Stream.make(new Uint8Array([1, 2])),
+      ]) {
+        const error = yield* client.write
+          .put("key", body, { contentLength: 999 })
+          .pipe(Effect.flip);
+        expect(error.message).toContain("body byte length");
+      }
+      expect(client.requests).toEqual([]);
+      yield* client.write.put("key", "é", { contentLength: 2 });
+      expect(client.requests[0]?.headers["content-length"]).toBe("2");
+    }).pipe(Effect.provide(runtime)),
+  );
   it.effect("serializes supported headers and returns the acknowledgement", () =>
     Effect.gen(function* () {
       const client = clients(response);

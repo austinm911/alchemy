@@ -1,6 +1,7 @@
 import * as r2 from "@distilled.cloud/cloudflare/r2";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Match from "effect/Match";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { authorizeWith } from "../HttpClientUtils.ts";
@@ -21,8 +22,9 @@ import { WriteBucket, type WriteBucketClient } from "./WriteBucket.ts";
  * HTTP-backed implementation of the {@link WriteBucket} binding.
  *
  * It creates a scoped token with `Workers R2 Storage Write` permission.
- * HTTP put supports contentLength, storageClass, and HTTP metadata except contentType contentType, and cacheExpiry.
+ * HTTP put supports contentLength, storageClass, and HTTP metadata except contentType and cacheExpiry.
  * Custom metadata, conditions, checksums, and SSE-C options fail before body consumption.
+ * Supplied contentLength must match the materialized body byte length before upload.
  */
 export const WriteBucketHttp = Layer.effect(
   WriteBucket,
@@ -65,29 +67,43 @@ export const makeWriteR2HttpClient = (
         Effect.andThen(scope),
         Effect.flatMap(({ accountId, bucketName, cfR2Jurisdiction }) =>
           toBody(value).pipe(
-            Effect.flatMap(({ body, contentLength }) => {
+            Effect.flatMap(({ body }) => {
               const meta = readHttpMetadata(options);
-              return authorize(
-                r2.putObject({
-                  accountId,
-                  bucketName,
-                  objectName: key,
-                  cfR2Jurisdiction,
-                  body,
-                  contentType: meta?.contentType,
-                  contentEncoding: meta?.contentEncoding,
-                  contentDisposition: meta?.contentDisposition,
-                  contentLanguage: meta?.contentLanguage,
-                  cacheControl: meta?.cacheControl,
-                  contentLength:
-                    options?.contentLength != null
-                      ? String(options.contentLength)
-                      : contentLength != null
-                        ? String(contentLength)
-                        : undefined,
-                  cfR2StorageClass: options?.storageClass,
-                }),
-              ).pipe(
+              const byteLength = Match.value(body).pipe(
+                Match.when(Match.string, (value) => new TextEncoder().encode(value).byteLength),
+                Match.when(Match.instanceOf(Blob), (value) => value.size),
+                Match.orElse((value) => value.byteLength),
+              );
+              const validateLength = Effect.void.pipe(
+                Effect.filterOrFail(
+                  () =>
+                    options?.contentLength === undefined || options.contentLength === byteLength,
+                  () =>
+                    new R2Error({
+                      message: "R2 HTTP contentLength must equal the upload body byte length.",
+                      cause: new Error("contentLength mismatch"),
+                    }),
+                ),
+              );
+              return validateLength.pipe(
+                Effect.andThen(
+                  authorize(
+                    r2.putObject({
+                      accountId,
+                      bucketName,
+                      objectName: key,
+                      cfR2Jurisdiction,
+                      body,
+                      contentType: meta?.contentType,
+                      contentEncoding: meta?.contentEncoding,
+                      contentDisposition: meta?.contentDisposition,
+                      contentLanguage: meta?.contentLanguage,
+                      cacheControl: meta?.cacheControl,
+                      contentLength: String(byteLength),
+                      cfR2StorageClass: options?.storageClass,
+                    }),
+                  ),
+                ),
                 Effect.flatMap(Schema.decodeUnknownEffect(UploadAcknowledgement)),
                 Effect.map((response) => ({
                   ...baseObject(response.key, {}, response),

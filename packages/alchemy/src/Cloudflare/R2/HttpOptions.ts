@@ -32,9 +32,12 @@ const metadataSupport = {
 
 const unsupported = (options: object | undefined, support: Record<string, boolean>) => {
   const supported = new Map(Object.entries(support));
-  return Object.entries(options ?? {})
-    .filter(([key, value]) => value !== undefined && supported.get(key) !== true)
-    .map(([key]) => key);
+  if (options === undefined) return [];
+  const keys = new Set([...Object.keys(support), ...Object.keys(options)]);
+  return [...keys].filter((key) => {
+    const value: unknown = Reflect.get(options, key);
+    return value !== undefined && supported.get(key) !== true;
+  });
 };
 
 const reject = (fields: string[]) =>
