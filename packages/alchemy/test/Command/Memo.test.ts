@@ -155,6 +155,11 @@ describe("scoped memo ignores", { tags: ["unit", "local"] }, () => {
         ["{src,other}/**/*", "!**/*.md"],
         ["src/\\[literal\\].txt"],
         ["src/**", "src/**"],
+        [`../${path.basename(root)}/src/**`],
+        ["src/**", `!../${path.basename(root)}/src/a.txt`],
+        ["src/*.txt"],
+        ["{src,other}/*.txt"],
+        ["src/@(a|b).*"],
         [path.join(root, "src/*.txt")],
       ]) {
         const normalized = include.map((p) => (path.isAbsolute(p) ? path.relative(root, p) : p));
@@ -194,6 +199,29 @@ describe("scoped memo ignores", { tags: ["unit", "local"] }, () => {
         ),
       ).toEqual(["src/input.txt"]);
       expect(visited).toHaveLength(2);
+    }).pipe(Effect.scoped, Effect.provide(BunServices.layer)),
+  );
+  it.effect("narrow includes prune unrelated directories before reading their ignores", () =>
+    Effect.gen(function* () {
+      const { fs, path, root } = yield* fixture({
+        "package.json": "{}",
+        "unrelated/deep/input.txt": "x",
+      });
+      yield* fs.makeDirectory(path.join(root, "unrelated/.gitignore"));
+      const visited: string[] = [];
+      const boundedFs: FileSystem.FileSystem = {
+        ...fs,
+        readDirectory: (directory, options) => {
+          visited.push(directory);
+          return fs.readDirectory(directory, options);
+        },
+      };
+      expect(
+        yield* gitIgnoreFiles({ cwd: root, include: ["package.json"] }).pipe(
+          Effect.provideService(FileSystem.FileSystem, boundedFs),
+        ),
+      ).toEqual(["package.json"]);
+      expect(visited).toEqual([root]);
     }).pipe(Effect.scoped, Effect.provide(BunServices.layer)),
   );
   it.effect("explicit exclude [] bypasses gitignore", () =>

@@ -4,6 +4,7 @@ import * as Path from "effect/Path";
 import type { PlatformError } from "effect/PlatformError";
 import ignore from "ignore";
 import picomatch from "picomatch";
+import { convertPathToPattern } from "tinyglobby";
 
 /** List memo inputs with each .gitignore scoped to the directory that owns it. */
 export const gitIgnoreFiles = Effect.fn("Command.gitIgnoreFiles")(function* (options: {
@@ -23,11 +24,34 @@ export const gitIgnoreFiles = Effect.fn("Command.gitIgnoreFiles")(function* (opt
       if (!pattern.startsWith("!!") || pattern.startsWith("!!(")) negative.push(pattern.slice(1));
     } else positive.push(pattern);
   }
-  const normalize = (pattern: string) => path.normalize(pattern.replace(/\/$/, ""));
+  const escapedCwd = convertPathToPattern(options.cwd);
+  const normalize = (pattern: string) =>
+    path.relative(escapedCwd, path.resolve(escapedCwd, pattern.replace(/\/$/, ""))) || ".";
   const patterns = positive.map(normalize);
   const globOptions = { dot: true, posix: true };
   const matches = picomatch(patterns, globOptions);
   const excluded = picomatch(negative.map(normalize), globOptions);
+  const prefixes = patterns.map((pattern) => {
+    const scanned = picomatch.scan(pattern, { parts: true });
+    return (scanned.parts?.length ? scanned.parts : [pattern]).map((part) => ({
+      part,
+      matches: picomatch(part, globOptions),
+    }));
+  });
+  const canContainMatch = (relative: string) => {
+    if (!relative || /^(\.\.\/)*\.\.$/.test(relative)) return true;
+    const segments = relative.split("/");
+    return prefixes.some((prefix) => {
+      for (const [index, segment] of segments.entries()) {
+        const matcher = prefix[index];
+        if (matcher === undefined) return false;
+        if (matcher.part.includes("/")) return true;
+        if (!matcher.matches(segment)) return false;
+        if (matcher.part === "**") return true;
+      }
+      return true;
+    });
+  };
   const portable = (value: string) => value.split(path.sep).join("/");
   const within = (directory: string, file: string) => {
     const relative = path.relative(directory, file);
@@ -84,7 +108,11 @@ export const gitIgnoreFiles = Effect.fn("Command.gitIgnoreFiles")(function* (opt
     scopes: string[],
     active: ReadonlySet<string>,
   ): Effect.fn.Return<void, PlatformError> {
-    if (pruned(directory, scopes)) return;
+    if (
+      !canContainMatch(portable(path.relative(options.cwd, directory))) ||
+      pruned(directory, scopes)
+    )
+      return;
     const real = yield* fs.realPath(directory);
     if (active.has(real)) return;
     const branch = new Set([...active, real]);
