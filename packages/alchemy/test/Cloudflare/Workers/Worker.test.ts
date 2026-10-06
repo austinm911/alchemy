@@ -1188,6 +1188,85 @@ describe.concurrent(
       { tags: ["live"], timeout: 360_000 },
     );
 
+    // Precreate publishes the URLs known before the first upload, so a cycle
+    // of Workers binding each other's `url` resolves on the first deploy.
+    // Worker A serves only on a custom domain (`workersDev: false`): its
+    // precreate `url` must be the domain, not `undefined`.
+    const circularUrlZone = process.env.CLOUDFLARE_TEST_WORKER_DOMAIN_ZONE_NAME;
+    test.provider.skipIf(!circularUrlZone)(
+      "circular Worker URL bindings resolve custom-domain and workers.dev URLs on the first deploy",
+      (stack) =>
+        Effect.gen(function* () {
+          const { accountId } = yield* yield* CloudflareEnvironment;
+          const suffix = process.env.PULL_REQUEST ?? process.env.USER ?? "local";
+          const domainA = `alchemy-circular-url-${suffix}.${circularUrlZone}`;
+
+          yield* stack.destroy();
+
+          const program = () =>
+            Effect.gen(function* () {
+              const a = yield* Cloudflare.Worker("CircularUrlA", {
+                main,
+                workersDev: false,
+                domain: domainA,
+              });
+              const b = yield* Cloudflare.Worker("CircularUrlB", { main });
+              yield* a.bind`B_URL`({
+                bindings: [
+                  {
+                    type: "plain_text",
+                    name: "B_URL",
+                    text: b.url.as<string>(),
+                  },
+                ],
+              });
+              yield* b.bind`A_URL`({
+                bindings: [
+                  {
+                    type: "plain_text",
+                    name: "A_URL",
+                    text: a.url.as<string>(),
+                  },
+                ],
+              });
+              return { a, b };
+            });
+
+          const deployed = yield* stack.deploy(program());
+          expect(deployed.a.url).toEqual(`https://${domainA}`);
+          expect(deployed.b.url).toMatch(/^https:\/\/.*\.workers\.dev$/);
+          for (const [worker, name, peerUrl] of [
+            [deployed.a, "B_URL", deployed.b.url],
+            [deployed.b, "A_URL", deployed.a.url],
+          ] as const) {
+            const settings = yield* workers.getScriptScriptAndVersionSetting({
+              accountId,
+              scriptName: worker.workerName,
+            });
+            expect(settings.bindings).toContainEqual(
+              expect.objectContaining({
+                type: "plain_text",
+                name,
+                text: peerUrl,
+              }),
+            );
+          }
+
+          const settled = yield* stack.plan(program());
+          for (const logicalId of ["CircularUrlA", "CircularUrlB"]) {
+            const node = (Object.values(settled.resources) as any[]).find(
+              (candidate) => candidate.resource.LogicalId === logicalId,
+            );
+            expect(node?.action).toBe("noop");
+          }
+
+          yield* stack.destroy();
+          yield* waitForWorkerToBeDeleted(deployed.a.workerName, accountId);
+          yield* waitForWorkerToBeDeleted(deployed.b.workerName, accountId);
+        }).pipe(logLevel),
+      { tags: ["live"], timeout: 360_000 },
+    );
+
     // The full circular case from the #874 report: A and B each bind the
     // OTHER's tag in env. The tags keep the dependency on the binding channel
     // (precreate stubs + converge pass) — a cycle the props channel cannot

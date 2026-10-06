@@ -1483,6 +1483,27 @@ export const LiveWorkerProvider = () =>
         return `https://${version.versionId.slice(0, 8)}-${scriptName}.${accountSubdomain}.workers.dev`;
       });
 
+      const computeStableWorkerUrls = Effect.fn(function* (params: {
+        scriptName: string;
+        workersDev: ResolvedWorkersDev;
+        domain: ResolvedWorkerDomain | undefined;
+      }) {
+        const { workersDev, domain, scriptName } = params;
+        const urls: string[] = [];
+        if (domain) {
+          urls.push(
+            `https://${domain.name}`,
+            ...domain.aliases.map((hostname) => `https://${hostname}`),
+          );
+        }
+        if (workersDev.enabled) {
+          const { accountId } = yield* yield* CloudflareEnvironment;
+          const accountSubdomain = yield* getAccountSubdomain(accountId);
+          urls.push(`https://${scriptName}.${accountSubdomain}.workers.dev`);
+        }
+        return urls;
+      });
+
       /**
        * Assemble every URL a deployed, script-owning Worker serves at, most
        * significant first — the first entry becomes the `url` attribute:
@@ -1507,34 +1528,23 @@ export const LiveWorkerProvider = () =>
         /** user-provided `version.alias` attached to the uploaded version */
         uploadedVersionAlias?: string;
       }) {
-        const { workersDev, domain, scriptName } = params;
-        const urls: string[] = [];
-        if (domain) {
-          urls.push(
-            `https://${domain.name}`,
-            ...domain.aliases.map((hostname) => `https://${hostname}`),
-          );
-        }
-        if (workersDev.enabled || workersDev.previewsEnabled) {
+        const { workersDev, scriptName } = params;
+        const urls = yield* computeStableWorkerUrls(params);
+        if (workersDev.previewsEnabled) {
           const { accountId } = yield* yield* CloudflareEnvironment;
           const accountSubdomain = yield* getAccountSubdomain(accountId);
-          if (workersDev.enabled) {
-            urls.push(`https://${scriptName}.${accountSubdomain}.workers.dev`);
-          }
-          if (workersDev.previewsEnabled) {
-            if (params.uploadedVersionId !== undefined) {
-              if (params.uploadedVersionAlias !== undefined) {
-                urls.push(
-                  `https://${params.uploadedVersionAlias}-${scriptName}.${accountSubdomain}.workers.dev`,
-                );
-              }
+          if (params.uploadedVersionId !== undefined) {
+            if (params.uploadedVersionAlias !== undefined) {
               urls.push(
-                `https://${params.uploadedVersionId.split("-")[0]}-${scriptName}.${accountSubdomain}.workers.dev`,
+                `https://${params.uploadedVersionAlias}-${scriptName}.${accountSubdomain}.workers.dev`,
               );
-            } else if (!workersDev.enabled) {
-              const previewUrl = yield* getPreviewUrl(scriptName, accountSubdomain);
-              if (previewUrl) urls.push(previewUrl);
             }
+            urls.push(
+              `https://${params.uploadedVersionId.split("-")[0]}-${scriptName}.${accountSubdomain}.workers.dev`,
+            );
+          } else if (!workersDev.enabled) {
+            const previewUrl = yield* getPreviewUrl(scriptName, accountSubdomain);
+            if (previewUrl) urls.push(previewUrl);
           }
         }
         return urls;
@@ -4828,19 +4838,24 @@ export const LiveWorkerProvider = () =>
           }
 
           /**
-           * Precreate publishes the stable `https://{name}.{subdomain}.workers.dev`
-           * URL when `workersDev` is enabled (the default). Cycle peers that
-           * interpolate `worker.url` (e.g. Stripe.WebhookEndpoint) need a
-           * valid HTTPS URL here — the previous `url: undefined` stub made
-           * Stripe reject `"undefined/webhooks/stripe"`. Custom domains and
-           * version/preview URLs are still unresolved; reconcile overwrites
-           * `url` with the final value. `workersDev: false` keeps `url`
-           * undefined.
+           * Precreate publishes the URLs that are known before the first
+           * upload, so cycle peers that interpolate `worker.url` (e.g. a
+           * Website reading its API's URL while the API allows the Website's
+           * origin, or Stripe.WebhookEndpoint) get a valid HTTPS URL instead of
+           * `undefined`: the custom domain and its aliases when `domain` is
+           * already resolved, then the stable workers.dev URL when
+           * `workersDev` is enabled (the default). Version/preview URLs are
+           * still unresolved; reconcile overwrites `url`/`urls` with the
+           * final values.
            */
-          const workersDevUrl = resolveWorkersDev(news.workersDev as WorkerProps["workersDev"])
-            .enabled
-            ? `https://${name}.${yield* getAccountSubdomain(accountId)}.workers.dev`
+          const domain = isResolved(news.domain)
+            ? yield* resolveWorkerDomain(news.domain)
             : undefined;
+          const urls = yield* computeStableWorkerUrls({
+            scriptName: name,
+            workersDev: resolveWorkersDev(news.workersDev as WorkerProps["workersDev"]),
+            domain,
+          });
 
           return {
             // The placeholder upload's tag (or, when adopting an existing
@@ -4850,12 +4865,12 @@ export const LiveWorkerProvider = () =>
             workerName: name,
             namespace: dispatchNamespace,
             logpush: existingSettings?.logpush ?? undefined,
-            url: workersDevUrl,
+            url: urls[0],
             tags: existingSettings?.tags ?? tags,
             durableObjectNamespaces,
             accountId,
-            urls: workersDevUrl !== undefined ? [workersDevUrl] : [],
-            domain: undefined,
+            urls,
+            domain,
             routes: [],
             crons: [],
           } satisfies Worker["Attributes"];
