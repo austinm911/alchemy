@@ -41,6 +41,7 @@ import { Assets } from "../Assets.ts";
 import { AWSEnvironment } from "../Environment.ts";
 import * as IAM from "../IAM/index.ts";
 import type { PolicyStatement } from "../IAM/Policy.ts";
+import { syncLogGroupRetention, type LogRetentionConfig } from "../Logs/LogRetention.ts";
 import type { Providers } from "../Providers.ts";
 import { syncEventInvokeConfig, type EventInvokeConfig } from "./EventInvokeConfig.ts";
 import { makeFunctionBundler } from "./FunctionBundle.ts";
@@ -293,6 +294,15 @@ export interface FunctionCommonProps extends PlatformProps {
    * config to an alias instead.
    */
   eventInvokeConfig?: EventInvokeConfig;
+  /**
+   * Retention for the function's CloudWatch log group
+   * (`/aws/lambda/<functionName>`), e.g. `{ retention: "2 weeks" }` or
+   * `{ retention: "forever" }`. When set, Alchemy creates (or adopts) the
+   * log group so the policy applies before the first invocation, and
+   * deletes it with the function. When omitted the log group is left to
+   * Lambda, which creates it on first invoke with no expiry.
+   */
+  logging?: LogRetentionConfig;
 }
 
 export interface FunctionZipProps extends FunctionCommonProps {
@@ -2350,6 +2360,17 @@ export const FunctionProvider = () =>
             functionName,
             config: news.eventInvokeConfig,
           });
+
+          // Lambda only auto-creates the log group on first invoke and with
+          // no expiry, so create (or adopt) it here to give the retention
+          // policy a group to attach to. The delete path already reaps it.
+          if (news.logging?.retention !== undefined) {
+            const logGroupName = `/aws/lambda/${functionName}`;
+            yield* logs
+              .createLogGroup({ logGroupName, tags: yield* createInternalTags(id) })
+              .pipe(Effect.catchTag("ResourceAlreadyExistsException", () => Effect.void));
+            yield* syncLogGroupRetention({ logGroupName, retention: news.logging.retention });
+          }
 
           const functionUrl = yield* createOrUpdateFunctionUrl({
             functionName,
