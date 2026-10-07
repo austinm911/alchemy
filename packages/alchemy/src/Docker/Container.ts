@@ -1,3 +1,4 @@
+import * as Data from "effect/Data";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Equal from "effect/Equal";
@@ -48,6 +49,12 @@ export interface ContainerProps {
   stopTimeout?: Duration.Input;
   /** Networks to connect after create. */
   networks?: Container.NetworkMapping[];
+  /** Network namespace. Use `{ container: id }` to share another container's namespace. */
+  networkMode?: Container.NetworkMode;
+  /** Linux capabilities to add, for example `SYS_ADMIN`. */
+  capAdd?: string[];
+  /** Host devices to expose to the container. */
+  devices?: Container.DeviceMapping[];
   /**
    * Extra `/etc/hosts` entries, each `hostname:address`. Docker's
    * `host-gateway` alias resolves to the host machine, so
@@ -93,6 +100,15 @@ export declare namespace Container {
     /** Network aliases for the container. */
     aliases?: string[];
   }
+  type NetworkMode = string | { container: string };
+  interface DeviceMapping {
+    /** Host device path. */
+    hostPath: string;
+    /** Container device path. */
+    containerPath: string;
+    /** Cgroup permissions. @default "rwm" */
+    permissions?: string;
+  }
   interface Healthcheck {
     /** Command to run for health checks. */
     cmd: string[] | string;
@@ -128,6 +144,12 @@ export interface Container extends Resource<
      * Format: `"80/tcp" -> 8080`.
      */
     ports: Record<string, number>;
+    /** Configured network namespace, when reported by Docker. */
+    networkMode?: string;
+    /** Added Linux capabilities, when reported by Docker. */
+    capAdd?: string[];
+    /** Configured host devices, when reported by Docker. */
+    devices?: Container.DeviceMapping[];
   },
   never,
   Providers
@@ -215,8 +237,27 @@ export interface Container extends Resource<
  * const api = yield* Docker.Container("api", {
  *   image: "ghcr.io/acme/api:latest",
  *   // Any `hostname:address` pair — host access is just the common case.
- *   extraHosts: ["payments.internal:10.1.2.3"],
+ *   extraHosts: ["service.example:192.0.2.10"],
  *   start: true,
+ * });
+ * ```
+ *
+ * ### Runtime Options
+ * **Example:** Share a donor container's network namespace
+ * ```typescript
+ * const donor = yield* Docker.Container("donor", { image: "redis:alpine" });
+ * const sidecar = yield* Docker.Container("sidecar", {
+ *   image: "busybox:latest",
+ *   networkMode: { container: donor.id },
+ * });
+ * ```
+ *
+ * **Example:** Add capabilities and devices
+ * ```typescript
+ * const worker = yield* Docker.Container("worker", {
+ *   image: "ubuntu:latest",
+ *   capAdd: ["SYS_ADMIN"],
+ *   devices: [{ hostPath: "/dev/fuse", containerPath: "/dev/fuse" }],
  * });
  * ```
  *
@@ -495,6 +536,7 @@ const matchesLegacyConfig = (live: Docker.Container, desired: CreateArgs, image:
 
 const makeCreateArgs = (id: string, news: ContainerProps, instanceId: string) =>
   dockerPhysicalName(id, news, instanceId).pipe(
+    Effect.tap(() => validateContainerOptions(news)),
     Effect.map((name): Parameters<Docker["Service"]["container"]["create"]>[0] => ({
       name,
       image: normalizeImageRef(news.image),
@@ -512,6 +554,9 @@ const makeCreateArgs = (id: string, news: ContainerProps, instanceId: string) =>
         return isRandomHostPort(port.external) ? target : `${port.external}:${target}`;
       }),
       "add-host": news.extraHosts,
+      network: normalizeNetworkMode(news.networkMode),
+      "cap-add": normalizeCapabilities(news.capAdd),
+      device: normalizeDevices(news.devices),
       restart: news.restart ?? "no",
       label: news.labels,
       "stop-timeout": toSeconds(news.stopTimeout)?.toString(),
@@ -548,7 +593,67 @@ const toContainerAttributes = (
   createdAt: Date.parse(info.Created) || Date.now(),
   imageRef,
   ports: toPortAttributes(info),
+  networkMode: info.HostConfig.NetworkMode,
+  capAdd: info.HostConfig.CapAdd ?? undefined,
+  devices: info.HostConfig.Devices?.map((device) => ({
+    hostPath: device.PathOnHost,
+    containerPath: device.PathInContainer,
+    permissions: device.CgroupPermissions,
+  })),
 });
+
+const normalizeNetworkMode = (mode: Container.NetworkMode | undefined): string | undefined =>
+  mode === undefined ? undefined : typeof mode === "string" ? mode : `container:${mode.container}`;
+
+const normalizeCapabilities = (capAdd: string[] | undefined): string[] | undefined => {
+  if (!capAdd?.length) return undefined;
+  return [...new Set(capAdd.map((capability) => capability.trim()).filter(Boolean))].sort();
+};
+
+const normalizeDevices = (devices: Container.DeviceMapping[] | undefined): string[] | undefined => {
+  if (!devices?.length) return undefined;
+  const normalized = devices.map(
+    (device) => `${device.hostPath}:${device.containerPath}:${device.permissions ?? "rwm"}`,
+  );
+  return [...new Set(normalized)].sort();
+};
+
+/**
+ * Raised before Docker is called when a container's options cannot be
+ * combined, e.g. sharing another container's network namespace while
+ * publishing ports.
+ */
+export class InvalidContainerOptions extends Data.TaggedError("InvalidContainerOptions")<{
+  readonly message: string;
+}> {}
+
+const validateContainerOptions = (news: ContainerProps) => {
+  if (
+    isContainerNetworkMode(news.networkMode) &&
+    ((news.ports?.length ?? 0) > 0 || (news.networks?.length ?? 0) > 0)
+  ) {
+    return Effect.fail(
+      new InvalidContainerOptions({
+        message: "Docker.Container networkMode.container cannot be combined with ports or networks",
+      }),
+    );
+  }
+  const targets = new Set<string>();
+  for (const device of news.devices ?? []) {
+    if (targets.has(device.containerPath)) {
+      return Effect.fail(
+        new InvalidContainerOptions({
+          message: `Docker.Container devices contain conflicting target path ${device.containerPath}`,
+        }),
+      );
+    }
+    targets.add(device.containerPath);
+  }
+  return Effect.void;
+};
+
+const isContainerNetworkMode = (mode: Container.NetworkMode | undefined): boolean =>
+  typeof mode === "string" ? mode.startsWith("container:") : mode !== undefined;
 
 /** First binding that carries a real (non-zero) host port. */
 const boundHostPort = (
