@@ -132,6 +132,8 @@ export class Docker extends Context.Service<
           "cache-to"?: Array<string>;
           args?: Array<string>;
           engineContext?: string;
+          /** Registry auth for the build itself (base images, caches); publishes nothing. */
+          credentials?: RegistryCredentials;
         },
         session?: ScopedPlanStatusSession,
         registry?: RegistryCredentials,
@@ -702,7 +704,7 @@ export const DockerLive = Layer.effect(
       },
       image: {
         build: Effect.fn("Docker.image.build")(function* (
-          { context: buildContext, engineContext, args, ...options },
+          { context: buildContext, engineContext, args, credentials, ...options },
           session,
           registry,
         ) {
@@ -719,7 +721,11 @@ export const DockerLive = Layer.effect(
           const buildArgs = [buildContext, ...formatArgs(options), ...(args ?? [])];
           const engine = formatArgs({ context: engineContext });
           if (registry === undefined) {
-            return yield* run([...engine, "image", "build", ...buildArgs], undefined, tap);
+            return yield* run(
+              [...engine, "image", "build", ...buildArgs],
+              credentials ? yield* registryEnvironment(credentials) : undefined,
+              tap,
+            );
           }
           const mode = yield* publication;
           if (mode === "export") {
