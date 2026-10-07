@@ -13,11 +13,6 @@ on:
         required: false
         type: string
         default: "beta"
-      force-latest:
-        description: Publish the release under the latest dist-tag
-        required: false
-        type: boolean
-        default: true
 
 concurrency:
   group: release-${{ github.ref }}
@@ -36,7 +31,6 @@ jobs:
     runs-on: blacksmith-8vcpu-ubuntu-2404
     outputs:
       sha: ${{ steps.commit.outputs.sha }}
-      tag: ${{ steps.release.outputs.tag }}
       version: ${{ steps.release.outputs.version }}
       channel: ${{ steps.release.outputs.channel }}
     steps:
@@ -65,11 +59,9 @@ jobs:
 
       - id: release
         name: Prepare release
-        env:
-          FORCE_LATEST: ${{ inputs.force-latest }}
         run: |
           set -euo pipefail
-          bun scripts/release/prepare.ts '${{ inputs.version }}' | tee -a "$GITHUB_OUTPUT"
+          node scripts/release/prepare.ts '${{ inputs.version }}' | tee -a "$GITHUB_OUTPUT"
 
       - name: Build release packages
         # The cold tsgo build can starve the runner without Go heap limits on
@@ -137,12 +129,7 @@ jobs:
           path: release-packages
 
       - name: Publish tarballs with OIDC
-        env:
-          PUBLISH_TAG: ${{ needs.build.outputs.tag }}
-          CHANNEL_TAG: ${{ needs.build.outputs.channel == 'release' && 'latest' || needs.build.outputs.channel == 'tag' && needs.build.outputs.tag || 'next' }}
-          FORCE_LATEST: ${{ inputs.force-latest }}
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: bash scripts/release/publish.sh
+        run: node scripts/release/publish.ts
 
       - name: Create GitHub release
         if: needs.build.outputs.channel != 'tag'
