@@ -42,8 +42,8 @@ export interface TerminalKey {
 export const useTerminalInput = (
   handler: (input: string, key: TerminalKey) => void,
   options?: { readonly active?: boolean },
-) => {
-  return useInput(
+) =>
+  useInput(
     (input, key) =>
       handler(input, {
         up: key.upArrow,
@@ -65,7 +65,6 @@ export const useTerminalInput = (
       }),
     { isActive: options?.active ?? true },
   );
-};
 
 /** Bracketed-paste input scoped the same way as {@link useTerminalInput}. */
 export const useTerminalPaste = (
@@ -951,8 +950,8 @@ export const filterChoices = <Value,>(choices: ReadonlyArray<Choice<Value>>, que
 export const useSelectedChoices = <Value,>(
   choices: ReadonlyArray<Choice<Value>>,
   initialValues: ReadonlyArray<Value>,
-) => {
-  return useState<ReadonlySet<number>>(
+) =>
+  useState<ReadonlySet<number>>(
     () =>
       new Set(
         initialValues.flatMap((value) => {
@@ -961,4 +960,3 @@ export const useSelectedChoices = <Value,>(
         }),
       ),
   );
-};
