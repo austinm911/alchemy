@@ -30,3 +30,7 @@ The HTTP tests use a real local server, production API schemas/client codecs, an
 The standard pnpm entrypoint is blocked by its configured package-manager release-age policy. Tests ran through the existing alchemy-test runner using a temporary preload that changes dynamic test import to synchronous require to preserve local collection context. No tracked runner or package-manager policy was changed. Targeted typechecking found no changed-file errors, but dependency and existing unrelated-source diagnostics prevent a clean project typecheck.
 
 This PR depends on the selected-stack synchronization fix.
+
+## 2026-10-09 refresh
+
+Merged current upstream main at 5ea356dcc25fab11bf3178e4ff1531a62708b51a. The original defect remains in upstream. 78 state/HTTP/upgrade tests passed. The transport retains upstream Schema.is authorization checks. Tests used the documented local runner preload. Provider qualification remains unchanged.
