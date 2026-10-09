@@ -1,6 +1,6 @@
 {
   "name": "@alchemy.run/floci",
-  "version": "2.0.0-beta.80",
+  "version": "2.0.0-beta.81",
   "description": "Effect-native manager for the floci local cloud emulator: ensure the container is running, health-gate it, and resolve the endpoint for alchemy's AWS local dev.",
   "keywords": [
     "alchemy",
@@ -30,18 +30,23 @@
   "main": "./lib/index.js",
   "types": "./lib/index.d.ts",
   "exports": {
-    ".": {
-      "types": "./lib/index.d.ts",
-      "bun": "./src/index.ts",
-      "import": "./lib/index.js"
-    },
+    ".": "./src/index.ts",
     "./package.json": "./package.json"
   },
   "publishConfig": {
+    "exports": {
+      ".": {
+        "types": "./lib/index.d.ts",
+        "bun": "./src/index.ts",
+        "default": "./lib/index.js"
+      },
+      "./package.json": "./package.json"
+    },
     "access": "public"
   },
   "scripts": {
-    "build": "tsc -b && bun ../../scripts/copy-package-files.ts floci"
+    "build": "pnpm -r --filter \"{.}...\" run build:package",
+    "build:package": "node scripts/build.ts"
   },
   "devDependencies": {
     "@types/node": "catalog:",

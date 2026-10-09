@@ -1,6 +1,6 @@
 {
   "name": "alchemy",
-  "version": "2.0.0-beta.80",
+  "version": "2.0.0-beta.81",
   "description": "Infrastructure as Effects for TypeScript.",
   "keywords": [
     "alchemy",
@@ -60,6 +60,8 @@
     "./Cloudflare/Live": "./src/Cloudflare/Live.ts",
     "./Cloudflare/RpcWebSocketClient": "./src/Cloudflare/Workers/RpcWebSocketClient.ts",
     "./Cloudflare/*": "./src/Cloudflare/*/index.ts",
+    "./Cloudflare/Workers/*": "./src/Cloudflare/Workers/*.ts",
+    "./Cloudflare/R2/*": "./src/Cloudflare/R2/*.ts",
     "./Drizzle": "./src/Drizzle/index.ts",
     "./Axiom": "./src/Axiom/index.ts",
     "./GCP": "./src/GCP/index.ts",
@@ -86,6 +88,7 @@
     "./Planetscale": "./src/Planetscale/index.ts",
     "./Planetscale/*": "./src/Planetscale/*/index.ts",
     "./Stripe": "./src/Stripe/index.ts",
+    "./Turso": "./src/Turso/index.ts",
     "./Runtime/Bootstrap/*": "./src/Runtime/Bootstrap/*.ts",
     "./Process": "./src/Process/index.ts",
     "./Redis": "./src/Redis/index.ts",
@@ -240,6 +243,16 @@
         "bun": "./src/Cloudflare/*/index.ts",
         "default": "./lib/Cloudflare/*/index.js"
       },
+      "./Cloudflare/Workers/*": {
+        "types": "./lib/Cloudflare/Workers/*.d.ts",
+        "bun": "./src/Cloudflare/Workers/*.ts",
+        "default": "./lib/Cloudflare/Workers/*.js"
+      },
+      "./Cloudflare/R2/*": {
+        "types": "./lib/Cloudflare/R2/*.d.ts",
+        "bun": "./src/Cloudflare/R2/*.ts",
+        "default": "./lib/Cloudflare/R2/*.js"
+      },
       "./Drizzle": {
         "types": "./lib/Drizzle/index.d.ts",
         "bun": "./src/Drizzle/index.ts",
@@ -334,6 +347,11 @@
         "bun": "./src/Stripe/index.ts",
         "default": "./lib/Stripe/index.js"
       },
+      "./Turso": {
+        "types": "./lib/Turso/index.d.ts",
+        "bun": "./src/Turso/index.ts",
+        "default": "./lib/Turso/index.js"
+      },
       "./Runtime/Bootstrap/*": {
         "types": "./src/Runtime/Bootstrap/*.ts",
         "bun": "./src/Runtime/Bootstrap/*.ts",
@@ -385,8 +403,10 @@
     "access": "public"
   },
   "scripts": {
-    "build": "bun scripts/build.ts",
+    "build": "pnpm -r --filter \"{.}...\" run build:package",
+    "build:package": "node scripts/build.ts",
     "clear:state": "cd ../../ && bun clear:state",
+    "pretest": "pnpm -w ensure:built",
     "test": "alchemy-test --exclude test/Railway",
     "nuke": "cd ../../ && bun nuke"
   },
@@ -404,12 +424,14 @@
     "@distilled.cloud/fly-io": "workspace:*",
     "@distilled.cloud/gcp": "workspace:*",
     "@distilled.cloud/hetzner": "workspace:*",
+    "@distilled.cloud/iceberg": "workspace:*",
     "@distilled.cloud/infisical": "workspace:*",
     "@distilled.cloud/neon": "workspace:*",
     "@distilled.cloud/planetscale": "workspace:*",
     "@distilled.cloud/prisma": "workspace:*",
     "@distilled.cloud/railway": "workspace:*",
     "@distilled.cloud/stripe": "workspace:*",
+    "@distilled.cloud/turso": "workspace:*",
     "@distilled.cloud/zerossl": "workspace:*",
     "@effect/sql-d1": "catalog:",
     "@effect/sql-sqlite-do": "catalog:",
@@ -421,7 +443,6 @@
     "@types/aws-lambda": "catalog:",
     "capnweb": "catalog:",
     "fflate": "catalog:",
-    "ignore": "catalog:",
     "libsodium-wrappers": "catalog:",
     "pathe": "catalog:",
     "picomatch": "catalog:",
@@ -437,6 +458,7 @@
     "@cloudflare/workers-types": "catalog:",
     "@effect/platform-bun": "catalog:",
     "@effect/platform-node": "catalog:",
+    "@effect/sql-libsql": "catalog:",
     "@effect/sql-mysql2": "catalog:",
     "@effect/sql-pg": "catalog:",
     "@effect/vitest": "catalog:",
@@ -507,6 +529,7 @@
     "@aws/durable-execution-sdk-js": "catalog:",
     "@effect/platform-bun": "catalog:",
     "@effect/platform-node": "catalog:",
+    "@effect/sql-libsql": "catalog:",
     "@effect/sql-mysql2": "catalog:",
     "@effect/sql-pg": "catalog:",
     "@effect/vitest": "catalog:",
@@ -539,6 +562,9 @@
       "optional": true
     },
     "@effect/platform-node": {
+      "optional": true
+    },
+    "@effect/sql-libsql": {
       "optional": true
     },
     "@effect/sql-mysql2": {
