@@ -443,6 +443,17 @@ describe("Ignore rules (in-memory trees)", { tags: ["unit", "local"] }, () => {
       }),
     );
 
+    it.effect("combined docker rules retain child reinclusion beneath excluded parents", () =>
+      Effect.sync(() => {
+        const rules = combineIgnoreRules("dockerignore", [
+          parseIgnoreRules("logs\n!logs/keep.log\n", "dockerignore"),
+        ]);
+        expect(rules.ignores("logs/keep.log")).toBe(false);
+        expect(rules.ignores("logs/drop.log")).toBe(true);
+        expect(rules.prunes("logs")).toBe(false);
+      }),
+    );
+
     // A project inside an ignored folder (a staging dir, a generated
     // workspace) still lists its own files: only directories below the
     // walk root can exclude their contents.

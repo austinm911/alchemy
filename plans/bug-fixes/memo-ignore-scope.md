@@ -8,6 +8,6 @@ parseIgnoreRules exposes explicit matching/negation decisions through the existi
 
 ## Current verification
 
-The original failing root /src/ fixture now passes on upstream. The narrower negation reproduction fails on upstream and passes with this change. 59 focused checks passed across shared ignore rules, Git oracle cases, the real Memo hash consumer, and existing Build lifecycle tests. Docker-backed oracle cases were excluded, while in-memory Docker semantics were exercised. Focused typecheck is clean.
+The original failing root /src/ fixture now passes on upstream. The narrower negation reproduction fails on upstream and passes with this change. 60 focused checks passed across shared ignore rules, Git oracle cases, the real Memo hash consumer, and existing Build lifecycle tests. Docker-backed oracle cases were excluded, while in-memory Docker semantics were exercised. Focused typecheck is clean.
 
 Tests used the existing alchemy-test runner with the documented temporary synchronous-import preload. No tracked runner or package-manager policy changed. No cloud resources were written.

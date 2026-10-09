@@ -442,12 +442,18 @@ export const combineIgnoreRules = (
         rules.some((rule) => rule.ignores(relativePath, isDirectory)),
     ),
   );
-  const ignores = (relativePath: string, isDirectory?: boolean) => {
-    const segments = normalizeRelativePath(relativePath).split("/").filter(Boolean);
-    return segments.some((_, index) =>
-      decision(segments.slice(0, index + 1).join("/"), index < segments.length - 1 || isDirectory),
-    );
-  };
+  const ignores = Match.value(dialect).pipe(
+    Match.when("gitignore", () => (relativePath: string, isDirectory?: boolean) => {
+      const segments = normalizeRelativePath(relativePath).split("/").filter(Boolean);
+      return segments.some((_, index) =>
+        decision(
+          segments.slice(0, index + 1).join("/"),
+          index < segments.length - 1 || isDirectory,
+        ),
+      );
+    }),
+    Match.orElse(() => decision),
+  );
   return {
     dialect,
     ignores,
