@@ -78,8 +78,6 @@ describe("R2 HTTP options", { tags: ["unit", "local"] }, () => {
     );
   }
   const puts: PutOptions[] = [
-    { httpMetadata: { contentType: "" } },
-    { httpMetadata: new Headers({ "Content-Type": "text/plain" }) },
     { customMetadata: {} },
     { customMetadata: { private: "private-value" } },
     { onlyIf: {} },
@@ -187,6 +185,7 @@ describe("R2 HTTP options", { tags: ["unit", "local"] }, () => {
         contentLength: 6,
         storageClass: "InfrequentAccess",
         httpMetadata: new Headers({
+          "Content-Type": "text/plain",
           "Content-Encoding": "identity",
           "Content-Disposition": "inline",
           "Content-Language": "en",
@@ -199,6 +198,7 @@ describe("R2 HTTP options", { tags: ["unit", "local"] }, () => {
       expect(request?.method).toBe("PUT");
       for (const [key, value] of Object.entries({
         "content-length": "6",
+        "content-type": "text/plain",
         "cf-r2-storage-class": "InfrequentAccess",
         "content-encoding": "identity",
         "content-disposition": "inline",

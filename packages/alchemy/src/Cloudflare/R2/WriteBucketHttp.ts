@@ -22,7 +22,7 @@ import { WriteBucket, type WriteBucketClient } from "./WriteBucket.ts";
  * HTTP-backed implementation of the {@link WriteBucket} binding.
  *
  * It creates a scoped token with `Workers R2 Storage Write` permission.
- * HTTP put supports contentLength, storageClass, and HTTP metadata except contentType and cacheExpiry.
+ * HTTP put supports contentLength, storageClass, and HTTP metadata except cacheExpiry.
  * Custom metadata, conditions, checksums, and SSE-C options fail before body consumption.
  * Supplied contentLength must match the materialized body byte length before upload.
  */

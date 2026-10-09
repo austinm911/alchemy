@@ -22,7 +22,7 @@ const putSupport = {
 } satisfies Record<keyof PutOptions, boolean>;
 
 const metadataSupport = {
-  contentType: false,
+  contentType: true,
   contentEncoding: true,
   contentDisposition: true,
   contentLanguage: true,
@@ -59,7 +59,6 @@ export const validateHttpPutOptions = Effect.fn("R2.validateHttpPutOptions")((
   const metadata = options?.httpMetadata;
   if (metadata instanceof Headers) {
     if (metadata.has("expires")) fields.push("httpMetadata.Expires");
-    if (metadata.has("content-type")) fields.push("httpMetadata.Content-Type");
   } else {
     fields.push(...unsupported(metadata, metadataSupport).map((key) => `httpMetadata.${key}`));
   }
