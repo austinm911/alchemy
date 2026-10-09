@@ -19,13 +19,16 @@ import { isDataset } from "../AnalyticsEngine/Dataset.ts";
 import { isNamespace } from "../Artifacts/Namespace.ts";
 import type { Container } from "../Containers/Container.ts";
 import type { ContainerApplication } from "../Containers/ContainerApplication.ts";
+import { workerContainerBinding } from "../Containers/ContainerConfiguration.ts";
 import { isDatabase } from "../D1/Database.ts";
 import { isSendEmail } from "../Email/SendEmail.ts";
 import { isApp } from "../Flagship/App.ts";
-import { getHyperdriveDevOrigin } from "../Hyperdrive/ConnectBinding.ts";
+import { getHyperdriveDevOriginForHost } from "../Hyperdrive/ConnectBinding.ts";
 import { isHyperdriveConnection } from "../Hyperdrive/Connection.ts";
 import { isImages } from "../Images/Images.ts";
+import { isStream as isK2Stream } from "../K2/Stream.ts";
 import { isNamespace as isKVNamespace } from "../KV/Namespace.ts";
+import { isMtlsCertificate } from "../MtlsCertificate/MtlsCertificate.ts";
 import { isLegacyPipeline } from "../Pipelines/LegacyPipeline.ts";
 import { isStream as isPipelinesStream } from "../Pipelines/Stream.ts";
 import { isQueue } from "../Queues/Queue.ts";
@@ -263,7 +266,7 @@ export const bindWorkerAsyncBindings = Effect.fn(function* (
         yield* resource.bind`${bindingName}`({
           bindings: [resolvedBindingMeta],
           hyperdrives: isHyperdriveConnection(binding)
-            ? getHyperdriveDevOrigin(binding)
+            ? yield* getHyperdriveDevOriginForHost(binding, resource)
             : undefined,
           // Dev-only local-emulation opt-out channel (like `hyperdrives`):
           // worker-only bindings and `SendEmail` descriptors piped through
@@ -369,13 +372,7 @@ const bindContainerClass = Effect.fn(function* (
         className,
       },
     ],
-    containers: [
-      {
-        className,
-        dev: application.dev,
-        hash: application.hash.pipe(Output.map((h) => h?.image)),
-      },
-    ],
+    containers: [workerContainerBinding(className, application)],
   });
   yield* application.bind`${bindingName}`({
     durableObjects: {
@@ -524,6 +521,13 @@ const toBinding = (
       name: bindingName,
       serviceId: binding.serviceId,
     };
+  } else if (isMtlsCertificate(binding)) {
+    // `env.NAME` is a Fetcher whose subrequests present the certificate.
+    return {
+      type: "mtls_certificate",
+      name: bindingName,
+      certificateId: binding.mtlsCertificateId,
+    };
   } else if (isDatabase(binding)) {
     return {
       type: "d1",
@@ -597,6 +601,15 @@ const toBinding = (
     // A named-entrypoint service binding (`Cloudflare.WorkerEntrypoint`).
     // Tested BEFORE `isWorker` — the marker carries the Worker rather than
     // being one, but keep the specific classifier ahead of the general one.
+    if (binding.worker === undefined) {
+      // One of this Worker's own named entrypoints: lowered like `Self`.
+      return {
+        type: "self_service",
+        name: bindingName,
+        entrypoint: binding.entrypoint,
+        props: binding.props,
+      };
+    }
     return {
       type: "service",
       name: bindingName,
@@ -659,6 +672,12 @@ const toBinding = (
       type: "pipelines",
       name: bindingName,
       pipeline: binding.name,
+    };
+  } else if (isK2Stream(binding)) {
+    return {
+      type: "k2",
+      name: bindingName,
+      stream: binding.streamId,
     };
   } else if (Output.isOutput(binding)) {
     return Output.map(binding, (value: Json | Redacted.Redacted<Json> | VpcServiceLookup) =>
