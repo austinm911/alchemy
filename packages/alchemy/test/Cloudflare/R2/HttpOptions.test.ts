@@ -7,6 +7,7 @@ import * as HttpClient from "effect/http/HttpClient";
 import type * as HttpClientRequest from "effect/http/HttpClientRequest";
 import * as HttpClientResponse from "effect/http/HttpClientResponse";
 import * as Layer from "effect/Layer";
+import * as Redacted from "effect/Redacted";
 import * as Stream from "effect/Stream";
 import type { R2Auth } from "@/Cloudflare/R2/BucketHttp.ts";
 import type { GetOptions, PutOptions } from "@/Cloudflare/R2/BucketTypes.ts";
@@ -39,7 +40,7 @@ const clients = (response: () => Response) => {
     }),
     authorize: (effect) =>
       effect.pipe(
-        Effect.provide(fromApiToken({ apiToken: "test-token" })),
+        Effect.provide(fromApiToken({ apiToken: Redacted.make("test-token") })),
         Effect.provideService(HttpClient.HttpClient, transport),
       ),
   };

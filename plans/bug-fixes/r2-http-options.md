@@ -17,3 +17,7 @@ No hosted Cloudflare calls or resource mutations were made. These checks qualify
 The standard pnpm entrypoint was blocked by its configured release-age policy. Tests used the existing runner with a temporary synchronous-import preload for a local test-collection issue. No tracked runner or package-manager policy changed.
 
 Astra accepted the corrected implementation with no remaining blocking findings.
+
+## 2026-10-09 refresh
+
+Merged current upstream main at 5ea356dcc25fab11bf3178e4ff1531a62708b51a. The original defect remains in upstream. 28 R2 HTTP tests passed with the current SDK. Test credentials now use its Redacted token contract. Tests used the documented local runner preload. Provider qualification remains unchanged.
