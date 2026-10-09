@@ -1,4 +1,4 @@
-import { assert, describe, expect } from "alchemy-test";
+import { assert, describe, expect, it } from "alchemy-test";
 import { Data, Layer } from "effect";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
@@ -32,6 +32,7 @@ import {
   type ReplacingResourceState,
   type ResourceState,
   State,
+  InMemoryService,
   StateStoreError,
 } from "@/State";
 import * as Test from "@/Test/Alchemy";
@@ -5314,6 +5315,32 @@ describe("Redacted props/outputs survive deploy", { tags: ["unit", "local"] }, (
 });
 
 describe("stack output persistence", { tags: ["unit", "local"] }, () => {
+  for (const output of [0, false, "", 1, true, "hello", { value: "object" }]) {
+    for (const prior of [undefined, "previous"]) {
+      it.effect(`public Stack preserves ${JSON.stringify(output)} after ${prior}`, () =>
+        Effect.gen(function* () {
+          const state = yield* InMemoryService({}, { scalar: { dev: prior } });
+          const stack = yield* Stack(
+            "scalar",
+            {
+              providers: Layer.empty,
+              state: Layer.succeed(State, Effect.succeed(state)),
+            },
+            Effect.succeed(output),
+          ).pipe(Effect.provideService(Stage, "dev"));
+          const result = yield* Plan.make(stack).pipe(
+            Effect.flatMap(apply),
+            Effect.provideService(State, Effect.succeed(state)),
+            Effect.provideService(Stack, stack),
+            Effect.provideService(Stage, "dev"),
+          );
+          expect(result).toEqual(output);
+          expect(yield* state.getOutput({ stack: "scalar", stage: "dev" })).toEqual(output);
+        }).pipe(Effect.scoped),
+      );
+    }
+  }
+
   const getStackOutput = (stack: string, stage: string) =>
     Effect.gen(function* () {
       const state = yield* yield* State;

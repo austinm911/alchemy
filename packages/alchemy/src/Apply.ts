@@ -280,7 +280,7 @@ export const apply = <P extends Plan>(
         return undefined;
       }
 
-      if (plan.selectedFqns !== undefined || !plan.output) {
+      if (plan.selectedFqns !== undefined || plan.output == null) {
         return undefined;
       }
 
