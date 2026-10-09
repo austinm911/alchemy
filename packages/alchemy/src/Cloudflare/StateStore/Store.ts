@@ -96,22 +96,20 @@ export default class Store extends DurableObject<Store>()(
 
         // -- Stack DO methods ----------------------------------------
 
-        /** (Stack DO only) List stages with at least one resource. */
-        listStages: () =>
-          storage
-            .list<string>({
-              prefix: RESOURCE_PREFIX,
-            })
-            .pipe(
-              Effect.map((entries) => {
-                const stages = new Set<string>();
-                for (const key of entries.keys()) {
-                  const parsed = parseResourceKey(key);
-                  if (parsed) stages.add(parsed.stage);
-                }
-                return [...stages];
-              }),
-            ),
+        /** (Stack DO only) List stages with resource records or a stack output. */
+        listStages: Effect.fn("StateStore.listStages")(function* () {
+          const [resources, outputs] = yield* Effect.all([
+            storage.list<string>({ prefix: RESOURCE_PREFIX }),
+            storage.list<string>({ prefix: STACK_OUTPUT_PREFIX }),
+          ]);
+          const stages = new Set<string>();
+          for (const key of resources.keys()) {
+            const parsed = parseResourceKey(key);
+            if (parsed) stages.add(parsed.stage);
+          }
+          for (const key of outputs.keys()) stages.add(key.slice(STACK_OUTPUT_PREFIX.length));
+          return [...stages];
+        }),
 
         /** (Stack DO only) List every resource FQN in a stage. */
         listResources: ({ stage }: { stage: string }) =>
@@ -193,11 +191,12 @@ export default class Store extends DurableObject<Store>()(
               ),
             ),
 
-        /**
-         * (Stack DO only) Persist the resolved stack output for
-         * `stage`. Returns the stored value unchanged.
-         */
-        setOutput: ({ stage, value }: { stage: string; value: any }) =>
+        /** (Stack DO only) Remove an output while retaining its resources. */
+        deleteOutput: ({ stage }: { stage: string }) =>
+          storage.delete(stackOutputKey(stage)).pipe(Effect.asVoid),
+
+        /** Persist a stage's resolved output and return the stored value. */
+        setOutput: ({ stage, value }: { stage: string; value: unknown }) =>
           encryptValue(value).pipe(
             Effect.flatMap((encrypted) =>
               storage.put<string>(stackOutputKey(stage), encrypted).pipe(Effect.asVoid),

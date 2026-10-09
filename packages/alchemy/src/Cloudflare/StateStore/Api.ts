@@ -10,7 +10,13 @@ import * as HttpRouter from "effect/http/HttpRouter";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import { RuntimeContext } from "../../RuntimeContext.ts";
-import { BearerTokenValidator, StateApi, StateAuthLive } from "../../State/HttpStateApi.ts";
+import {
+  BearerTokenValidator,
+  StateApi,
+  StateAuthLive,
+  STATE_STORE_CAPABILITIES,
+  StackOutputPresence,
+} from "../../State/HttpStateApi.ts";
 import { ReadSecret } from "../SecretsStore/ReadSecret.ts";
 import { ReadSecretBinding } from "../SecretsStore/ReadSecretBinding.ts";
 import { Worker } from "../Workers/Worker.ts";
@@ -28,7 +34,7 @@ export const STATE_STORE_SCRIPT_NAME = "alchemy-state-store" as const;
  * compare against this constant; a mismatch (or 404) triggers a
  * forced redeploy via the bootstrap flow.
  */
-export const STATE_STORE_VERSION = 7 as const;
+export const STATE_STORE_VERSION = 8 as const;
 
 /**
  * Hard-coded OTLP/HTTP endpoints. Point at the public ingest relay
@@ -135,6 +141,22 @@ export default Worker(
 
     const stateApi = HttpApiBuilder.group(StateApi, "state", (handlers) =>
       handlers
+        .handle("getCapabilities", () => Effect.succeed(STATE_STORE_CAPABILITIES))
+        .handle("getStackOutputV2", ({ params }) =>
+          store
+            .getByName(params.stack)
+            .getOutput({ stage: params.stage })
+            .pipe(
+              Effect.map((value) =>
+                value === undefined
+                  ? StackOutputPresence.cases.Absent.make({})
+                  : StackOutputPresence.cases.Present.make({ value }),
+              ),
+            ),
+        )
+        .handle("deleteStackOutput", ({ params }) =>
+          store.getByName(params.stack).deleteOutput({ stage: params.stage }),
+        )
         .handle("listStacks", () =>
           store
             .getByName(Store.ROOT_DO_NAME)
@@ -257,7 +279,7 @@ export default Worker(
         .handle("setStackOutput", ({ params, payload }) =>
           store
             .getByName(params.stack)
-            .setOutput({ stage: params.stage, value: payload as any })
+            .setOutput({ stage: params.stage, value: payload })
             .pipe(
               Effect.tap(() =>
                 store.getByName(Store.ROOT_DO_NAME).registerStack({ stack: params.stack }),

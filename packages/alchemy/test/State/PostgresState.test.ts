@@ -295,6 +295,26 @@ const sampleState = {
 } as never;
 
 describe("Postgres state store", { tags: ["unit", "local"] }, () => {
+  it.effect("deletes output idempotently through the lease guard and preserves resources", () => {
+    const fake = makeFakePostgres();
+    return withStore(fake, { leaseCheckTtlMs: 0 }, (store) =>
+      Effect.gen(function* () {
+        yield* store.set({ ...request, value: sampleState });
+        yield* store.setOutput({ ...request, value: null });
+        yield* store.deleteOutput(request);
+        yield* store.deleteOutput(request);
+        expect(yield* store.getOutput(request)).toBeUndefined();
+        expect(yield* store.get(request)).toBeDefined();
+        yield* store.setOutput({ ...request, value: "keep" });
+        fake.control.lockLive = false;
+        expect(yield* store.deleteOutput(request).pipe(Effect.flip)).toBeInstanceOf(
+          StateStoreError,
+        );
+        expect(fake.outputs.get("app prod")).toBe("keep");
+      }),
+    );
+  });
+
   it.effect("requires exactly one of client or url", () => {
     const fake = makeFakePostgres();
     return Effect.gen(function* () {

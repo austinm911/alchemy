@@ -1,6 +1,13 @@
 import { describe, expect, it } from "alchemy-test";
 import * as Effect from "effect/Effect";
-import { InMemoryService, syncState, type ResourceState, type StateService } from "@/State";
+import * as Redacted from "effect/Redacted";
+import {
+  InMemoryService,
+  syncState,
+  StateStoreError,
+  type ResourceState,
+  type StateService,
+} from "@/State";
 
 describe("syncState", { tags: ["unit", "local"] }, () => {
   it.effect("copies source resources and overwrites matching destination resources", () =>
@@ -87,6 +94,82 @@ describe("syncState", { tags: ["unit", "local"] }, () => {
         },
       });
       yield* syncState(unreachable, unreachable, { stacks: [] });
+    }),
+  );
+  it.effect("mirrors output-only stages including null and falsy values", () =>
+    Effect.gen(function* () {
+      const values = [
+        null,
+        0,
+        false,
+        "",
+        [1, 2],
+        { date: new Date("2026-01-02"), secret: Redacted.make("fixture") },
+      ] as const;
+      const source = yield* InMemoryService();
+      const destination = yield* InMemoryService({}, { obsolete: { prod: "remove" } });
+      for (const [index, value] of values.entries())
+        yield* source.setOutput({ stack: "outputs", stage: String(index), value });
+      yield* syncState(source, destination);
+      expect(yield* destination.listStacks()).toEqual(["outputs"]);
+      for (const [index, value] of values.entries())
+        expect(yield* destination.getOutput({ stack: "outputs", stage: String(index) })).toEqual(
+          value,
+        );
+    }),
+  );
+
+  it.effect(
+    "clears stale output without removing surviving resources and removes destination-only stages",
+    () =>
+      Effect.gen(function* () {
+        const row = resource("row", { value: "source" });
+        const source = yield* InMemoryService({ app: { dev: { row } } });
+        const destination = yield* InMemoryService(
+          { app: { dev: { row }, prod: { row } } },
+          { app: { dev: "stale", prod: "obsolete" } },
+        );
+        yield* syncState(source, destination);
+        expect(yield* destination.getOutput({ stack: "app", stage: "dev" })).toBeUndefined();
+        yield* expectStage(destination, "app", "dev", { row });
+        expect(yield* destination.listStages("app")).toEqual(["dev"]);
+        expect(yield* destination.getOutput({ stack: "app", stage: "prod" })).toBeUndefined();
+      }),
+  );
+
+  for (const failedRead of ["get", "getOutput"] as const)
+    it.effect(`source ${failedRead} failure precedes every mutation in that stage`, () =>
+      Effect.gen(function* () {
+        const row = resource("row", { value: "source" });
+        const old = resource("row", { value: "destination" });
+        const source: StateService = {
+          ...(yield* InMemoryService({ app: { dev: { row } } })),
+          [failedRead]: () => Effect.fail(new StateStoreError({ message: "read failed" })),
+        };
+        const destination = yield* InMemoryService(
+          { app: { dev: { row: old } } },
+          { app: { dev: "keep" } },
+        );
+        expect((yield* syncState(source, destination).pipe(Effect.flip)).message).toBe(
+          "read failed",
+        );
+        yield* expectStage(destination, "app", "dev", { row: old });
+        expect(yield* destination.getOutput({ stack: "app", stage: "dev" })).toBe("keep");
+      }),
+    );
+
+  it.effect("output write failure remains visible after resource writes", () =>
+    Effect.gen(function* () {
+      const row = resource("row", { value: "source" });
+      const source = yield* InMemoryService({ app: { dev: { row } } }, { app: { dev: "new" } });
+      const destination: StateService = {
+        ...(yield* InMemoryService()),
+        setOutput: () => Effect.fail(new StateStoreError({ message: "output write failed" })),
+      };
+      expect((yield* syncState(source, destination).pipe(Effect.flip)).message).toBe(
+        "output write failed",
+      );
+      yield* expectStage(destination, "app", "dev", { row });
     }),
   );
 });

@@ -8,6 +8,7 @@ import * as HttpApiClient from "effect/http-api/HttpApiClient";
 import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientRequest from "effect/http/HttpClientRequest";
 import * as Layer from "effect/Layer";
+import * as Match from "effect/Match";
 import * as Option from "effect/Option";
 import * as Redacted from "effect/Redacted";
 import * as Schedule from "effect/Schedule";
@@ -30,8 +31,10 @@ import {
   makeHttpStateStore,
   type HttpStateStoreCredentials,
 } from "../../State/HttpStateStore.ts";
+import { makeHttpStateTransport, mapStateStoreError } from "../../State/HttpStateTransport.ts";
 import { makeLocalState } from "../../State/LocalState.ts";
-import { State, type StateService, type StateStoreError } from "../../State/State.ts";
+import { State, type StateService, StateStoreError } from "../../State/State.ts";
+import { reviveStateRecursive } from "../../State/StateEncoding.ts";
 import { recordStateStoreInit, recordStateStoreOp } from "../../Telemetry/Metrics.ts";
 import * as Access from "../Access.ts";
 import * as CloudflareEnvironment from "../CloudflareEnvironment.ts";
@@ -106,9 +109,9 @@ export const state = () =>
               }
             }
 
-            const httpState = yield* ensureAccess({ url, authToken });
+            const accessCredentials = yield* ensureAccess({ url, authToken });
             if (matches) {
-              return httpState;
+              return yield* makeCloudflareStateStore(accessCredentials);
             }
 
             // The store is out of date. Upgrade it in place.
@@ -119,14 +122,9 @@ export const state = () =>
                   label: `Updating Cloudflare State Store '${scriptName}'`,
                   detail: `v${observed ?? "unknown"} → v${expected}`,
                 },
-                Effect.gen(function* () {
-                  const stateStoreOptions = yield* deployStateStore({
-                    stage: scriptName,
-                    state: httpState,
-                    force: false,
-                  });
-                  return yield* makeCloudflareStateStore(stateStoreOptions);
-                }),
+                redeployCloudflareStateStore(accessCredentials, observed, (state) =>
+                  deployStateStore({ stage: scriptName, state, force: false }),
+                ),
               );
             }).pipe(withStateBootstrapEvents(scriptName));
 
@@ -173,9 +171,9 @@ export const state = () =>
                   }),
                 );
               }
-              return yield* makeCloudflareStateStore(credentials);
+              return credentials;
             }
-            return yield* makeCloudflareStateStore(credentials);
+            return credentials;
           });
 
         const { accountId } = yield* yield* CloudflareEnvironment.CloudflareEnvironment;
@@ -326,21 +324,18 @@ export const bootstrap = (options: BootstrapOptions = {}) =>
           );
         }
         const { matches, expected, observed } = yield* checkStateStoreVersion(url);
-        const httpState = yield* makeCloudflareStateStore({ url, authToken });
         if (!matches || force) {
           return yield* interaction.task(
             {
               label: `${matches ? "Redeploying" : "Updating"} Cloudflare State Store '${scriptName}'`,
               detail: matches ? "forced" : `v${observed ?? "unknown"} → v${expected}`,
             },
-            deployStateStore({
-              stage: scriptName,
-              state: httpState,
-              force,
-            }).pipe(Effect.flatMap(makeCloudflareStateStore)),
+            redeployCloudflareStateStore({ url, authToken }, observed, (state) =>
+              deployStateStore({ stage: scriptName, state, force }),
+            ),
           );
         } else {
-          return httpState;
+          return yield* makeCloudflareStateStore({ url, authToken });
         }
       } else {
         return yield* interaction.task(
@@ -837,21 +832,91 @@ const isStateStoreServing = (accountId: string) =>
     return observed !== undefined;
   });
 
-const makeCloudflareStateStore = Effect.fn(function* ({
-  url,
-  authToken,
-}: {
-  url: string;
-  authToken: string;
-}) {
+const cloudflareTransportProps = Effect.fn("StateStore.transportProps")(function* (
+  credentials: HttpStateStoreCredentials,
+) {
   const access = yield* Access.Access;
-  const accessHeaders = yield* access.getAccessHeaders(new URL(url).host);
-  return yield* makeHttpStateStore({
-    url,
-    authToken,
-    transformClient: HttpClientRequest.setHeaders(accessHeaders),
+  const headers = yield* access.getAccessHeaders(new URL(credentials.url).host);
+  return {
+    ...credentials,
+    transformClient: HttpClientRequest.setHeaders(headers),
     id: "cloudflare-http",
-  });
+  };
+});
+
+const makeCloudflareStateStore = Effect.fn("StateStore.makeCheckedStore")(function* (
+  credentials: HttpStateStoreCredentials,
+) {
+  const state = yield* makeHttpStateStore(yield* cloudflareTransportProps(credentials));
+  yield* state.listStacks();
+  return state;
+});
+
+/** Private v7-to-v8 bridge. Remove with the raw output endpoint in the next major protocol release. */
+const makeLegacyBootstrapStateStore = Effect.fn("StateStore.makeLegacyBootstrapStore")(function* (
+  credentials: HttpStateStoreCredentials,
+) {
+  yield* Config.Boolean("ALCHEMY_STATE_STORE_V8_UPGRADE_READY").pipe(
+    Config.withDefault(false),
+    Effect.filterOrFail(
+      (ready) => ready,
+      () =>
+        new StateStoreError({
+          message:
+            "Before upgrading the shared state store to v8, update every operator and CI runner and stop older bootstrap processes. Older clients can downgrade the worker. Then set ALCHEMY_STATE_STORE_V8_UPGRADE_READY=true for the upgrade.",
+        }),
+    ),
+  );
+  const { service, apiClient } = yield* makeHttpStateTransport(
+    yield* cloudflareTransportProps(credentials),
+  );
+  yield* service.getVersion().pipe(
+    Effect.filterOrFail(
+      (version) => version === 7,
+      () =>
+        new StateStoreError({
+          message:
+            "The legacy bootstrap adapter requires a positively identified v7 state-store worker.",
+        }),
+    ),
+  );
+  const legacy: StateService = {
+    ...service,
+    getOutput: (request) =>
+      apiClient.state.getStackOutput({ params: request }).pipe(
+        Effect.map((value) => (value == null ? undefined : reviveStateRecursive(value))),
+        mapStateStoreError,
+      ),
+    deleteOutput: () =>
+      Effect.fail(
+        new StateStoreError({
+          message: "Output deletion is unavailable during the v7-to-v8 bootstrap upgrade.",
+        }),
+      ),
+  };
+  return legacy;
+});
+
+/** @internal Shared by automatic and explicit bootstrap, with deployment supplied at the cloud boundary. */
+export const redeployCloudflareStateStore = Effect.fn("StateStore.redeploy")(function* <E, R>(
+  credentials: HttpStateStoreCredentials,
+  observed: number | undefined,
+  redeploy: (state: StateService) => Effect.Effect<HttpStateStoreCredentials, E, R>,
+) {
+  const state = yield* Match.value(observed).pipe(
+    Match.when(7, () => makeLegacyBootstrapStateStore(credentials)),
+    Match.when(STATE_STORE_VERSION, () => makeCloudflareStateStore(credentials)),
+    Match.orElse(() =>
+      Effect.fail(
+        new StateStoreError({
+          message:
+            "Unsupported managed state-store revision. Refusing to replace or downgrade it automatically.",
+        }),
+      ),
+    ),
+  );
+  const updated = yield* redeploy(state);
+  return yield* makeCloudflareStateStore(updated);
 });
 
 export class StateStoreVersionNotReady extends Data.TaggedError("StateStoreVersionNotReady")<{

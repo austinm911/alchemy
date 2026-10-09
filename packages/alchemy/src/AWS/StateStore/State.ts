@@ -382,6 +382,10 @@ export const makeS3State = (options: S3StateOptions = {}) =>
           ),
         ),
       getOutput: (request) => run((bucket) => readJson(bucket, outputKey(request))),
+      deleteOutput: (request) =>
+        run((bucket) => s3.deleteObject({ Bucket: bucket, Key: outputKey(request) })).pipe(
+          Effect.asVoid,
+        ),
       setOutput: (request) =>
         run((bucket) => writeJson(bucket, outputKey(request), request.value)).pipe(
           Effect.map(() => request.value),

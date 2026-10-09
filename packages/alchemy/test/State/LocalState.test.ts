@@ -43,6 +43,22 @@ const statePath = (...segments: string[]) =>
   });
 
 describe("makeLocalState", { tags: ["unit", "local"] }, () => {
+  it.effect("deleteOutput is idempotent and preserves resource files", () =>
+    Effect.gen(function* () {
+      const state = yield* makeLocalState();
+      const request = { stack: "local-output-delete", stage: "test" };
+      const value = resource("row", { value: true });
+      yield* state.set({ ...request, fqn: "row", value });
+      yield* state.setOutput({ ...request, value: null });
+      expect(yield* state.getOutput(request)).toBeNull();
+      yield* state.deleteOutput(request);
+      yield* state.deleteOutput(request);
+      expect(yield* state.getOutput(request)).toBeUndefined();
+      expect(yield* state.get({ ...request, fqn: "row" })).toEqual(value);
+      yield* state.deleteStack(request);
+    }).pipe(Effect.provide(PlatformServices)),
+  );
+
   it.effect("reads of absent state recover to empty results", () =>
     Effect.gen(function* () {
       const state = yield* makeLocalState();

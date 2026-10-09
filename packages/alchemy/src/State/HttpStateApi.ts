@@ -139,6 +139,7 @@ export const GetReplacedResources = HttpApiEndpoint.get(
   },
 );
 
+/** @deprecated Use GetStackOutputV2. Remove at the next major state-protocol release. */
 export const GetStackOutput = HttpApiEndpoint.get(
   "getStackOutput",
   "/state/stacks/:stack/stages/:stage/output",
@@ -147,6 +148,42 @@ export const GetStackOutput = HttpApiEndpoint.get(
     success: Schema.UndefinedOr(ResourceStateSchema),
   },
 );
+
+/** Explicit presence preserves stored null through JSON transport. */
+export const StackOutputPresence = Schema.TaggedUnion({
+  Absent: {},
+  Present: { value: Schema.Unknown },
+});
+
+export const GetStackOutputV2 = HttpApiEndpoint.get(
+  "getStackOutputV2",
+  "/v2/state/stacks/:stack/stages/:stage/output",
+  {
+    params: StackStage,
+    success: StackOutputPresence,
+  },
+);
+
+export const DeleteStackOutput = HttpApiEndpoint.delete(
+  "deleteStackOutput",
+  "/state/stacks/:stack/stages/:stage/output",
+  {
+    params: StackStage,
+    success: HttpApiSchema.NoContent,
+  },
+);
+
+export const STATE_STORE_CAPABILITIES = {
+  protocolVersion: 6,
+  capabilities: ["output-presence-v1", "delete-output-v1", "output-stage-enumeration-v1"],
+} as const;
+
+export const GetCapabilities = HttpApiEndpoint.get("getCapabilities", "/state/capabilities", {
+  success: Schema.Struct({
+    protocolVersion: Schema.Number,
+    capabilities: Schema.Array(Schema.String),
+  }),
+});
 
 export const SetStackOutput = HttpApiEndpoint.put(
   "setStackOutput",
@@ -167,7 +204,7 @@ export const SetStackOutput = HttpApiEndpoint.put(
  * compare against this constant; a mismatch (or 404) triggers a
  * forced redeploy via the bootstrap flow.
  */
-export const STATE_STORE_VERSION = 5 as const;
+export const STATE_STORE_VERSION = 6 as const;
 
 /** Response shape for the unauthenticated `/version` probe. */
 export const VersionResponse = Schema.Struct({
@@ -194,6 +231,9 @@ export class StateGroup extends HttpApiGroup.make("state")
   .add(GetReplacedResources)
   .add(DeleteStack)
   .add(GetStackOutput)
+  .add(GetStackOutputV2)
+  .add(DeleteStackOutput)
+  .add(GetCapabilities)
   .add(SetStackOutput)
   .middleware(StateAuth) {}
 

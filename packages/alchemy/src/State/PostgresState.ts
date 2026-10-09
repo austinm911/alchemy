@@ -590,6 +590,14 @@ export const makePostgresState = <E = never, R = never>(
             }),
           ),
         ),
+      deleteOutput: (request) =>
+        guarded(
+          request,
+          run(
+            (sql) =>
+              sql`delete from alchemy_stack_output where stack = ${request.stack} and stage = ${request.stage}`,
+          ).pipe(Effect.asVoid),
+        ),
       setOutput: (request) =>
         guarded(
           request,

@@ -26,9 +26,12 @@ export const InMemoryService = (
     Effect.succeed({
       id: "inmemory",
       getVersion: () => Effect.succeed(STATE_STORE_VERSION),
-      listStacks: () => Effect.succeed(Array.from(Object.keys(state))),
+      listStacks: () =>
+        Effect.succeed([...new Set([...Object.keys(state), ...Object.keys(outputs)])]),
       listStages: (stack: string) =>
-        Effect.succeed(Array.from(stack in state ? Object.keys(state[stack]) : [])),
+        Effect.succeed([
+          ...new Set([...Object.keys(state[stack] ?? {}), ...Object.keys(outputs[stack] ?? {})]),
+        ]),
       get: ({ stack, stage, fqn }: { stack: string; stage: string; fqn: string }) =>
         Effect.succeed(state[stack]?.[stage]?.[fqn]),
       getReplacedResources: ({ stack, stage }: { stack: string; stage: string }) =>
@@ -70,6 +73,11 @@ export const InMemoryService = (
         Effect.succeed(Array.from(Object.keys(state[stack]?.[stage] ?? {}) ?? [])),
       getOutput: ({ stack, stage }: { stack: string; stage: string }) =>
         Effect.succeed(outputs[stack]?.[stage]),
+      deleteOutput: ({ stack, stage }: { stack: string; stage: string }) =>
+        Effect.sync(() => {
+          delete outputs[stack]?.[stage];
+          if (outputs[stack] && Object.keys(outputs[stack]).length === 0) delete outputs[stack];
+        }),
       setOutput: ({ stack, stage, value }: { stack: string; stage: string; value: unknown }) =>
         Effect.sync(() => {
           const stackOutputs = (outputs[stack] ??= {});

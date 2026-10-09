@@ -1,5 +1,5 @@
 import * as Effect from "effect/Effect";
-import { type StateService } from "./State.ts";
+import { StateStoreError, type StateService } from "./State.ts";
 
 /**
  * Synchronize all state (every stack/stage/resource) from `source` into
@@ -51,23 +51,42 @@ export const syncState = Effect.fn("State.syncState")(function* (
 
       yield* Effect.forEach(
         stages,
-        Effect.fn(function* (stage) {
+        Effect.fn("State.syncStage")(function* (stage) {
+          if (!sourceStages.includes(stage)) {
+            yield* destination.deleteStack({ stack, stage });
+            return;
+          }
           const sourceFqns = yield* source.list({ stack, stage });
           const destFqns = yield* destination.list({ stack, stage });
 
           const sourceSet = new Set(sourceFqns);
           const toDelete = destFqns.filter((fqn) => !sourceSet.has(fqn));
 
+          const snapshot = yield* Effect.all({
+            output: source.getOutput({ stack, stage }),
+            resources: Effect.forEach(
+              sourceFqns,
+              Effect.fn("State.snapshotResource")(function* (fqn) {
+                const value = yield* source.get({ stack, stage, fqn }).pipe(
+                  Effect.filterOrFail(
+                    (value) => value !== undefined,
+                    () =>
+                      new StateStoreError({
+                        message:
+                          "A source resource disappeared during state synchronization. Coordinate writers before retrying.",
+                      }),
+                  ),
+                );
+                return { fqn, value };
+              }),
+              { concurrency },
+            ),
+          });
           yield* Effect.all(
             [
               Effect.forEach(
-                sourceFqns,
-                Effect.fn(function* (fqn) {
-                  const value = yield* source.get({ stack, stage, fqn });
-                  if (value) {
-                    yield* destination.set({ stack, stage, fqn, value });
-                  }
-                }),
+                snapshot.resources,
+                ({ fqn, value }) => destination.set({ stack, stage, fqn, value }),
                 { concurrency },
               ),
               Effect.forEach(toDelete, (fqn) => destination.delete({ stack, stage, fqn }), {
@@ -76,6 +95,11 @@ export const syncState = Effect.fn("State.syncState")(function* (
             ],
             { concurrency: "unbounded" },
           );
+          if (snapshot.output === undefined) {
+            yield* destination.deleteOutput({ stack, stage });
+          } else {
+            yield* destination.setOutput({ stack, stage, value: snapshot.output });
+          }
         }),
         { concurrency: "unbounded" },
       );

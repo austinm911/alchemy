@@ -107,8 +107,7 @@ export interface StateService {
   }): Effect.Effect<readonly string[], StateStoreError, never>;
   /**
    * Read the persisted stack output for `(stack, stage)`. Returns
-   * `undefined` when the stack has not been deployed (or has been
-   * destroyed) at this stage.
+   * `undefined` when no output is stored. Null and falsy scalars are stored values.
    *
    * Stack outputs are written by `apply` once the deploy succeeds and
    * read by cross-stack references (`yield* OtherStack` /
@@ -118,6 +117,12 @@ export interface StateService {
     stack: string;
     stage: string;
   }): Effect.Effect<unknown, StateStoreError, never>;
+  /** Remove only this stage's output. Idempotent, leaving resource records intact. */
+  deleteOutput(request: {
+    stack: string;
+    stage: string;
+  }): Effect.Effect<void, StateStoreError, never>;
+
   /**
    * Persist the resolved stack output for `(stack, stage)`.
    */
