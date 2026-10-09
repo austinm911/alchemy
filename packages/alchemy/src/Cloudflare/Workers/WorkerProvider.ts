@@ -2769,7 +2769,13 @@ export const LiveWorkerProvider = () =>
             item.type === "self_url"
               ? { type: "plain_text" as const, name: item.name, text: selfUrl! }
               : item.type === "self_service"
-                ? { type: "service" as const, name: item.name, service: parentName }
+                ? {
+                    type: "service" as const,
+                    name: item.name,
+                    service: parentName,
+                    ...(item.entrypoint !== undefined && { entrypoint: item.entrypoint }),
+                    ...(item.props !== undefined && { props: item.props }),
+                  }
                 : item,
           ),
         );
@@ -3111,7 +3117,13 @@ export const LiveWorkerProvider = () =>
             item.type === "self_url"
               ? { type: "plain_text" as const, name: item.name, text: selfUrl! }
               : item.type === "self_service"
-                ? { type: "service" as const, name: item.name, service: parentName }
+                ? {
+                    type: "service" as const,
+                    name: item.name,
+                    service: parentName,
+                    ...(item.entrypoint !== undefined && { entrypoint: item.entrypoint }),
+                    ...(item.props !== undefined && { props: item.props }),
+                  }
                 : item,
           ),
         );
@@ -3306,7 +3318,13 @@ export const LiveWorkerProvider = () =>
             // Lower the `Worker.Self` sentinel into a service
             // binding targeting this Worker's own physical name.
             if (item.type === "self_service") {
-              return { type: "service", name: item.name, service: name };
+              return {
+                type: "service",
+                name: item.name,
+                service: name,
+                ...(item.entrypoint !== undefined && { entrypoint: item.entrypoint }),
+                ...(item.props !== undefined && { props: item.props }),
+              };
             }
             if (item.type === "durable_object_namespace" && item.transferredFrom !== undefined) {
               const { transferredFrom: _, ...rest } = item;
