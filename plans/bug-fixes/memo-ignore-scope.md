@@ -1,17 +1,13 @@
-# Scoped ignores in build memoization
+# Nearer gitignore negation
 
-Memo uses one internal GitIgnore evaluator when excludes are omitted. Each ignore parser belongs to its file's directory. Ancestor rules load before an include root, including roots outside cwd. Descendant rules preserve order and negation. Pruned parent directories cannot be reopened by a child rule. A .git file or directory marks the ancestor boundary. Archives fall back to the filesystem root without running Git.
+Upstream PR #2066 fixed the original ancestor anchoring defect and introduced the shared Util/Ignore.ts implementation. This PR now addresses only ordered negation across those ancestor scopes. It removes the old PR's separate Command/GitIgnore.ts evaluator, parser dependency, and broad grammar/traversal changes.
 
-The pinned `ignore` parser is case-sensitive. Per-hash caches prevent stale rule reads. Lexical paths remain hash keys. Real directory identities are tracked only along the active traversal branch, preserving symlink aliases while stopping cycles. Positive include prefixes and ignore rules both prune traversal. Includes retain picomatch syntax and normalize parent-relative paths against cwd.
+For a root `*.txt` rule and an app-local `!keep.txt`, edits to keep.txt must change the memo hash. An unmatched nearer scope retains the inherited decision. An excluded parent directory cannot be reopened by a child-file negation. Directory negation at the directory itself is supported. Docker rule composition keeps its existing semantics.
 
-Explicit excludes, including `[]`, bypass GitIgnore and use the original tinyglobby implementation. Lockfile defaults and runtime-directory artifact exceptions remain. The obsolete gitignore-to-glob converter is removed. Corrected nested and negated semantics can cause one corrective rebuild.
+parseIgnoreRules exposes explicit matching/negation decisions through the existing IgnoreRules abstraction. combineIgnoreRules checks ancestor directories before each file and combines scopes from outermost to nearest. Memo continues to use the upstream parser and walker.
 
-## Verification
+## Current verification
 
-18 Memo/Build tests passed. They compare ignore decisions with Git, compare include grammar with tinyglobby, prove ignored and unrelated directory pruning, and cover symlinks, archives, worktree markers, outside-cwd includes, and explicit overrides. Actual BuildProvider application changes the built artifact from version one to version two after a nested package source edit, while unchanged and ignored inputs stay noop.
+The original failing root /src/ fixture now passes on upstream. The narrower negation reproduction fails on upstream and passes with this change. 59 focused checks passed across shared ignore rules, Git oracle cases, the real Memo hash consumer, and existing Build lifecycle tests. Docker-backed oracle cases were excluded, while in-memory Docker semantics were exercised. Focused typecheck is clean.
 
-Astra identified parent-relative normalization and positive-include pruning regressions in the first implementation. Both have regression coverage and are corrected. Targeted Memo typechecking is clean. Git is used only by test fixtures.
-
-The standard pnpm entrypoint was blocked by its configured release-age policy. Tests used the existing runner with a temporary synchronous-import preload for a local test-collection issue. No tracked runner or package-manager policy changed.
-
-Astra accepted the corrected implementation with no remaining blocking findings.
+Tests used the existing alchemy-test runner with the documented temporary synchronous-import preload. No tracked runner or package-manager policy changed. No cloud resources were written.
