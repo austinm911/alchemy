@@ -3553,9 +3553,14 @@ export const LiveWorkerProvider = () =>
           });
         }
 
-        // Collect container-backed class names so we can send container metadata
-        const containerClassNames = new Set(
-          bindings.flatMap((b) => (b.data.containers ?? []).map((c) => c.className)),
+        // Collect container-backed classes so we can send container metadata.
+        // `name` and `images` are only set for Durable Object-managed applications.
+        const containerClasses = new Map(
+          bindings.flatMap((b) =>
+            (b.data.containers ?? []).map(
+              ({ className, name, images }) => [className, { className, name, images }] as const,
+            ),
+          ),
         );
 
         // Compute new, renamed, and transferred classes
@@ -3668,7 +3673,7 @@ export const LiveWorkerProvider = () =>
           newSqliteClasses,
         };
 
-        const metadataContainers = [...containerClassNames].map((className) => ({ className }));
+        const metadataContainers = [...containerClasses.values()];
 
         const compatibility = getCompatibility(news);
         const tailConsumers = resolveTailConsumers(news.tailConsumers);
@@ -4692,7 +4697,7 @@ export const LiveWorkerProvider = () =>
           ).filter((binding) => !binding.transferredFrom);
           const doClasses = durableObjects.map((binding) => binding.className);
           // Only attach container metadata for classes actually fronted by a
-          // Container binding (mirrors reconcile's `containerClassNames`).
+          // Container binding (mirrors reconcile's `containerClasses`).
           // Mapping every DO class to a container would wrongly mark plain DOs
           // as container-backed in the placeholder.
           const containers = Array.from(
