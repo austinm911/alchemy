@@ -420,6 +420,40 @@ describe("Ignore rules (in-memory trees)", { tags: ["unit", "local"] }, () => {
       }),
     );
 
+    it.effect("nearer gitignore negation overrides an ancestor file exclusion", () =>
+      Effect.gen(function* () {
+        const rules = combineIgnoreRules("gitignore", [
+          parseIgnoreRules("*.txt\n", "gitignore", { prefix: "packages/app" }),
+          parseIgnoreRules("!keep.txt\n", "gitignore"),
+        ]);
+        expect(rules.ignores("keep.txt")).toBe(false);
+        expect(rules.ignores("drop.txt")).toBe(true);
+        expect(rules.ignores("source.ts")).toBe(false);
+        const blocked = combineIgnoreRules("gitignore", [
+          parseIgnoreRules("blocked/\n", "gitignore"),
+          parseIgnoreRules("!blocked/keep.txt\n", "gitignore"),
+        ]);
+        expect(blocked.prunes("blocked")).toBe(true);
+        expect(blocked.ignores("blocked/keep.txt")).toBe(true);
+        const directory = combineIgnoreRules("gitignore", [
+          parseIgnoreRules("generated/\n", "gitignore"),
+          parseIgnoreRules("!generated/\n", "gitignore"),
+        ]);
+        expect(directory.prunes("generated")).toBe(false);
+      }),
+    );
+
+    it.effect("combined docker rules retain child reinclusion beneath excluded parents", () =>
+      Effect.sync(() => {
+        const rules = combineIgnoreRules("dockerignore", [
+          parseIgnoreRules("logs\n!logs/keep.log\n", "dockerignore"),
+        ]);
+        expect(rules.ignores("logs/keep.log")).toBe(false);
+        expect(rules.ignores("logs/drop.log")).toBe(true);
+        expect(rules.prunes("logs")).toBe(false);
+      }),
+    );
+
     // A project inside an ignored folder (a staging dir, a generated
     // workspace) still lists its own files: only directories below the
     // walk root can exclude their contents.

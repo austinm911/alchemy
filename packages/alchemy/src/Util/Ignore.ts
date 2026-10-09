@@ -20,6 +20,7 @@
 import createGitIgnore from "@alchemy.run/node-utils/ignore";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import * as Match from "effect/Match";
 import * as Path from "effect/Path";
 import * as Result from "effect/Result";
 
@@ -32,6 +33,11 @@ export interface IgnoreRules {
    * ignore file applies to and use `/` separators.
    */
   readonly ignores: (relativePath: string, isDirectory?: boolean) => boolean;
+  /** Explicit gitignore match, including negation, for ordered scope composition. */
+  readonly match?: (
+    relativePath: string,
+    isDirectory?: boolean,
+  ) => ReturnType<ReturnType<typeof createGitIgnore>["matches"]>;
   /**
    * Whether a directory and everything below it is excluded, so a walk can
    * skip reading it. Conservative: `false` only costs a directory read.
@@ -86,22 +92,23 @@ const parseGitIgnore = (lines: ReadonlyArray<string>, prefix: string): IgnoreRul
   // Git's rule: a path is excluded when a parent directory is, otherwise by
   // the last rule matching the path itself. The parent walk starts below the
   // walk root; directory-only patterns need the trailing slash.
-  const ignores = (relativePath: string, isDirectory?: boolean) => {
+  const match = (relativePath: string, isDirectory?: boolean) => {
     const segments = normalizeRelativePath(relativePath).split("/").filter(Boolean);
     for (let index = 0; index < segments.length; index++) {
       const path = full(segments.slice(0, index + 1).join("/"));
       const isLast = index === segments.length - 1;
       const result = matcher.matches(isLast && !isDirectory ? path : `${path}/`);
-      if (isLast) return result.ignored;
-      if (result.ignored) return true;
+      if (isLast || result.ignored) return result;
     }
-    return false;
+    return { ignored: false, unignored: false };
   };
   return {
     dialect: "gitignore",
-    ignores,
+    match: (relativePath, isDirectory) =>
+      matcher.matches(full(normalizeRelativePath(relativePath)) + (isDirectory ? "/" : "")),
+    ignores: (relativePath, isDirectory) => match(relativePath, isDirectory).ignored,
     // Git cannot re-include anything below an excluded directory.
-    prunes: (relativeDirectory) => ignores(relativeDirectory, true),
+    prunes: (relativeDirectory) => match(relativeDirectory, true).ignored,
   };
 };
 
@@ -412,16 +419,52 @@ export const listFileSystemDirectory = Effect.fn(function* (root: string) {
 });
 
 /**
- * Combine rule sets, e.g. the `.gitignore` files from a working directory up
- * to the repository root (each parsed with its own `prefix`). A path is
- * excluded when any rule set excludes it.
+ * Combine rule sets from outermost to nearest scope. A nearer gitignore
+ * match can override an inherited file exclusion. An unmatched scope keeps
+ * the inherited decision, and pruned parent directories remain inaccessible.
  */
 export const combineIgnoreRules = (
   dialect: IgnoreDialect,
   rules: ReadonlyArray<IgnoreRules>,
-): IgnoreRules => ({
-  dialect,
-  ignores: (relativePath, isDirectory) =>
-    rules.some((rule) => rule.ignores(relativePath, isDirectory)),
-  prunes: (relativeDirectory) => rules.some((rule) => rule.prunes(relativeDirectory)),
-});
+): IgnoreRules => {
+  const decision = Match.value(dialect).pipe(
+    Match.when(
+      "gitignore",
+      () => (relativePath: string, isDirectory?: boolean) =>
+        rules.reduce((ignored, rule) => {
+          if (rule.match === undefined) return ignored || rule.ignores(relativePath, isDirectory);
+          const result = rule.match(relativePath, isDirectory);
+          return result.ignored || result.unignored ? result.ignored : ignored;
+        }, false),
+    ),
+    Match.orElse(
+      () => (relativePath: string, isDirectory?: boolean) =>
+        rules.some((rule) => rule.ignores(relativePath, isDirectory)),
+    ),
+  );
+  const ignores = Match.value(dialect).pipe(
+    Match.when("gitignore", () => (relativePath: string, isDirectory?: boolean) => {
+      const segments = normalizeRelativePath(relativePath).split("/").filter(Boolean);
+      return segments.some((_, index) =>
+        decision(
+          segments.slice(0, index + 1).join("/"),
+          index < segments.length - 1 || isDirectory,
+        ),
+      );
+    }),
+    Match.orElse(() => decision),
+  );
+  return {
+    dialect,
+    ignores,
+    prunes: Match.value(dialect).pipe(
+      Match.when(
+        "gitignore",
+        () => (relativeDirectory: string) => ignores(relativeDirectory, true),
+      ),
+      Match.orElse(
+        () => (relativeDirectory: string) => rules.some((rule) => rule.prunes(relativeDirectory)),
+      ),
+    ),
+  };
+};
