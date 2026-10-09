@@ -13,10 +13,11 @@ import { type StateService } from "./State.ts";
  * Stacks are walked sequentially; stages within a stack and resources
  * within a stage are processed concurrently for throughput.
  */
-export const syncState = Effect.fn(function* (
+export const syncState = Effect.fn("State.syncState")(function* (
   source: StateService,
   destination: StateService,
   options?: {
+    /** Restrict all mutations to these stacks. An empty selection does nothing. */
     stacks?: string[];
     /**
      * Maximum number of resources to copy in parallel within a single stage.
@@ -25,18 +26,23 @@ export const syncState = Effect.fn(function* (
     concurrency?: number | "unbounded";
   },
 ) {
+  if (options?.stacks?.length === 0) return;
+
   const concurrency = options?.concurrency ?? "unbounded";
   const [sourceStacks, destStacks] = yield* Effect.all([
     source.listStacks(),
     destination.listStacks(),
   ]);
-  const sourceStackSet = new Set(
-    sourceStacks.filter((stack) => options?.stacks?.includes(stack) ?? true),
-  );
+  const sourceStackSet = new Set(sourceStacks);
+  const selectedStacks = [...new Set(options?.stacks ?? union(sourceStacks, destStacks))];
 
   yield* Effect.forEach(
-    sourceStacks,
-    Effect.fn(function* (stack) {
+    selectedStacks,
+    Effect.fn("State.syncStack")(function* (stack) {
+      if (!sourceStackSet.has(stack)) {
+        if (destStacks.includes(stack)) yield* destination.deleteStack({ stack });
+        return;
+      }
       const [sourceStages, destStages] = yield* Effect.all([
         source.listStages(stack),
         destination.listStages(stack),
@@ -74,11 +80,6 @@ export const syncState = Effect.fn(function* (
         { concurrency: "unbounded" },
       );
     }),
-  );
-
-  yield* Effect.forEach(
-    destStacks.filter((stack) => !sourceStackSet.has(stack)),
-    (stack) => destination.deleteStack({ stack }),
   );
 });
 
